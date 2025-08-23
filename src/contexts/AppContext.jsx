@@ -1,7 +1,7 @@
 // src/contexts/AppContext.jsx
 
-import React, { createContext, useState, useEffect, useContext } from 'react';
-import { supabase } from '../supabaseClient'; // UPDATED: Import Supabase client instead of Firebase
+import React, { createContext, useState, useEffect, useContext, useCallback } from 'react';
+import { supabase } from '../supabaseClient';
 
 const AppContext = createContext();
 
@@ -12,18 +12,15 @@ export const AppProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const [companyId, setCompanyId] = useState(null);
   const [currentUser, setCurrentUser] = useState(null);
-  const [session, setSession] = useState(null); // ADDED: State for Supabase session
+  const [session, setSession] = useState(null);
 
-  // SUPABASE AUTH LISTENER: Replaces Firebase's onAuthStateChanged
   useEffect(() => {
-    // Fetch the initial session
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       setCurrentUser(session?.user ?? null);
       setLoading(false);
     });
 
-    // Listen for auth state changes
     const { data: authListener } = supabase.auth.onAuthStateChange(
       (_event, session) => {
         setSession(session);
@@ -32,18 +29,15 @@ export const AppProvider = ({ children }) => {
       }
     );
 
-    // Cleanup the listener on component unmount
     return () => {
       authListener.subscription.unsubscribe();
     };
   }, []);
 
-  // FETCH COMPANY ID: This effect runs when the current user changes
   useEffect(() => {
     const fetchCompanyId = async () => {
       if (currentUser) {
         setLoading(true);
-        // Fetch the user's profile to get their company_id
         const { data, error } = await supabase
           .from('profiles')
           .select('company_id')
@@ -58,7 +52,6 @@ export const AppProvider = ({ children }) => {
         }
         setLoading(false);
       } else {
-        // Clear data on logout
         setCompanyId(null);
         setEmployees([]);
       }
@@ -66,37 +59,37 @@ export const AppProvider = ({ children }) => {
 
     fetchCompanyId();
   }, [currentUser]);
+  
+  // Create a reusable function to fetch employees
+  const fetchEmployees = useCallback(async () => {
+    if (!companyId) return;
+    setLoading(true);
+    const { data, error } = await supabase
+      .from('employees')
+      .select('*')
+      .eq('company_id', companyId)
+      .order('name', { ascending: true });
 
-  // FETCH EMPLOYEES: This effect runs when the companyId is available
-  useEffect(() => {
-    if (companyId) {
-      const fetchEmployees = async () => {
-        setLoading(true);
-        // Fetch all employees for the current company
-        const { data, error } = await supabase
-          .from('employees')
-          .select('*')
-          .eq('company_id', companyId)
-          .order('name', { ascending: true });
-
-        if (error) {
-          console.error('Error fetching employees:', error);
-        } else {
-          setEmployees(data);
-        }
-        setLoading(false);
-      };
-
-      fetchEmployees();
+    if (error) {
+      console.error('Error fetching employees:', error);
+    } else {
+      setEmployees(data);
     }
+    setLoading(false);
   }, [companyId]);
+
+  // Fetch employees when companyId changes
+  useEffect(() => {
+    fetchEmployees();
+  }, [companyId, fetchEmployees]);
 
   const value = {
     employees,
     loading,
     companyId,
     currentUser,
-    session, // Pass session down for other components
+    session,
+    refetchEmployees: fetchEmployees, // Expose the refetch function
   };
 
   return (

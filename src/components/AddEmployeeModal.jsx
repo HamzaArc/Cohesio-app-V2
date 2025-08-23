@@ -1,7 +1,7 @@
 // src/components/AddEmployeeModal.jsx
 
 import React, { useState, useEffect } from 'react';
-import { supabase } from '../supabaseClient'; // UPDATED: Import Supabase client
+import { supabase } from '../supabaseClient';
 import { X, AlertCircle } from 'lucide-react';
 import DatalistInput from './DatalistInput';
 import { useAppContext } from '../contexts/AppContext';
@@ -21,7 +21,8 @@ const ValidatedInput = ({ id, label, value, onChange, error, ...props }) => (
 );
 
 function AddEmployeeModal({ isOpen, onClose, onEmployeeAdded }) {
-  const { companyId, employees: allEmployees } = useAppContext(); // UPDATED: Get employees from context
+  // UPDATED: Get refetchEmployees from context
+  const { companyId, employees: allEmployees, refetchEmployees } = useAppContext();
   const [formData, setFormData] = useState({
     name: '', email: '', position: '', department: '', hire_date: '', status: 'active',
     phone: '', address: '', gender: '', compensation: '', employment_type: 'Full-time',
@@ -35,7 +36,6 @@ function AddEmployeeModal({ isOpen, onClose, onEmployeeAdded }) {
 
   useEffect(() => {
     if (isOpen) {
-        // Extract unique department names from existing employees
         const deptSet = new Set(allEmployees.map(emp => emp.department).filter(Boolean));
         setDepartments([...deptSet]);
     }
@@ -66,7 +66,6 @@ function AddEmployeeModal({ isOpen, onClose, onEmployeeAdded }) {
     validate(newFormData);
   };
 
-  // SUPABASE INSERT LOGIC
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!validate() || !companyId) {
@@ -75,16 +74,18 @@ function AddEmployeeModal({ isOpen, onClose, onEmployeeAdded }) {
     setLoading(true);
 
     try {
-      // Insert a new record into the 'employees' table
       const { error } = await supabase.from('employees').insert({
         ...formData,
-        company_id: companyId, // Add the company_id foreign key
+        company_id: companyId,
         vacation_balance: Number(formData.vacation_balance) || 0,
         sick_balance: Number(formData.sick_balance) || 0,
         personal_balance: Number(formData.personal_balance) || 0,
       });
 
       if (error) throw error;
+      
+      // UPDATED: Trigger a refetch of the employee list
+      await refetchEmployees();
       
       onEmployeeAdded();
       handleClose();
@@ -131,29 +132,24 @@ function AddEmployeeModal({ isOpen, onClose, onEmployeeAdded }) {
             
             <DatalistInput id="department" label="Department" value={formData.department} onChange={handleChange} error={errors.department} options={departments} type="text" placeholder="Select or type to create new"/>
 
-            {/* UPDATED: id changed to match database schema */}
             <ValidatedInput id="hire_date" label="Hire Date" value={formData.hire_date} onChange={handleChange} error={errors.hire_date} type="date" required />
             <div>
               <label htmlFor="status" className="block text-sm font-medium text-gray-700">Status</label>
               <select id="status" value={formData.status} onChange={handleChange} className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2"><option value="active">Active</option><option value="onboarding">Onboarding</option></select>
             </div>
-            {/* UPDATED: id changed to match database schema */}
             <ValidatedInput id="employment_type" label="Employment Type" value={formData.employment_type} onChange={handleChange} error={errors.employment_type} type="text" />
             <ValidatedInput id="compensation" label="Compensation" value={formData.compensation} onChange={handleChange} error={errors.compensation} type="text" placeholder="e.g., 50000 / year" />
             <div className="md:col-span-2">
-                {/* UPDATED: id changed to match database schema */}
                 <label htmlFor="manager_email" className="block text-sm font-medium text-gray-700">Reports To</label>
                 <select id="manager_email" value={formData.manager_email} onChange={handleChange} className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2"><option value="">No Manager</option>{allEmployees.map(emp => <option key={emp.id} value={emp.email}>{emp.name}</option>)}</select>
             </div>
 
             <h3 className="md:col-span-2 text-lg font-semibold text-gray-700 border-b pb-2 mt-4">Emergency Contact</h3>
-            {/* UPDATED: ids changed to match database schema */}
             <ValidatedInput id="emergency_contact_name" label="Contact Name" value={formData.emergency_contact_name} onChange={handleChange} error={errors.emergency_contact_name} type="text" />
             <ValidatedInput id="emergency_contact_relationship" label="Relationship" value={formData.emergency_contact_relationship} onChange={handleChange} error={errors.emergency_contact_relationship} type="text" />
             <ValidatedInput id="emergency_contact_phone" label="Contact Phone" value={formData.emergency_contact_phone} onChange={handleChange} error={errors.emergency_contact_phone} type="tel" />
             
             <h3 className="md:col-span-2 text-lg font-semibold text-gray-700 border-b pb-2 mt-4">Time Off Balances (Days)</h3>
-            {/* UPDATED: ids changed to match database schema */}
             <ValidatedInput id="vacation_balance" label="Vacation" value={formData.vacation_balance} onChange={handleChange} error={errors.vacation_balance} type="number" />
             <ValidatedInput id="sick_balance" label="Sick" value={formData.sick_balance} onChange={handleChange} error={errors.sick_balance} type="number" />
             <ValidatedInput id="personal_balance" label="Personal" value={formData.personal_balance} onChange={handleChange} error={errors.personal_balance} type="number" />
