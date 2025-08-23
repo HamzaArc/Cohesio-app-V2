@@ -1,28 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { Download } from 'lucide-react';
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
-import { db } from '../firebase';
-import { doc, onSnapshot } from 'firebase/firestore';
-import { useAppContext } from '../contexts/AppContext';
 
-
-function Payslip({ payrollRun, employeeData, employeeProfile }) {
-  const { companyId } = useAppContext();
-  const [companyInfo, setCompanyInfo] = useState(null);
-
-  useEffect(() => {
-    if (!companyId) return;
-    const settingsRef = doc(db, 'companies', companyId, 'policies', 'payroll');
-    const unsubscribe = onSnapshot(settingsRef, (docSnap) => {
-      if (docSnap.exists()) {
-        setCompanyInfo(docSnap.data());
-      }
-    });
-    return () => unsubscribe();
-  }, [companyId]);
-
-  if (!payrollRun || !employeeData || !employeeProfile) return null;
+function Payslip({ payrollRun, employeeData, employeeProfile, companyInfo }) {
+  if (!payrollRun || !employeeData || !employeeProfile || !companyInfo) {
+    return <div className="p-4 text-center">Loading payslip data...</div>;
+  }
 
   const grossPay = (employeeData.baseSalary || 0) + (employeeData.overtime || 0) + (employeeData.bonuses || 0) + (employeeData.benefits || 0);
   const totalDeductions = (employeeData.cnss || 0) + (employeeData.amo || 0) + (employeeData.ir || 0) + (employeeData.otherDeductions || 0);

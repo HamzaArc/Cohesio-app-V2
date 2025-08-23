@@ -1,15 +1,14 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { db } from '../firebase';
-import { doc, onSnapshot, updateDoc, serverTimestamp } from 'firebase/firestore';
-import { Check, Banknote, Save } from 'lucide-react';
+import { Check, Save } from 'lucide-react';
 import { useAppContext } from '../contexts/AppContext';
+import { subscribeToPayrollRun, savePayrollDraft, finalizePayroll } from '../services/payrollService';
 
 const Step = ({ number, label, isActive }) => ( <div className="flex items-center"><div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold ${isActive ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-600'}`}>{isActive ? <Check size={20} /> : number}</div><p className={`ml-3 font-semibold ${isActive ? 'text-blue-600' : 'text-gray-600'}`}>{label}</p></div> );
 
 function RunPayroll() {
   const { runId } = useParams();
-  const { employees, loading: employeesLoading, companyId } = useAppContext();
+  const { employees, loading: employeesLoading } = useAppContext();
   const [payrollRun, setPayrollRun] = useState(null);
   const [employeeData, setEmployeeData] = useState({});
   const [loading, setLoading] = useState(true);
@@ -17,47 +16,49 @@ function RunPayroll() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    if (!runId || !companyId) { 
-        setLoading(false); 
-        return; 
+    if (!runId) {
+      setLoading(false);
+      return;
     }
-    const runRef = doc(db, 'companies', companyId, 'payrollRuns', runId);
-    const unsubscribe = onSnapshot(runRef, (docSnap) => {
-        if (docSnap.exists()) {
-            const run = { id: docSnap.id, ...docSnap.data() };
-            setPayrollRun(run);
-            
-            if (employees.length > 0 && Object.keys(employeeData).length === 0) {
-                const initialData = {};
-                employees.forEach(emp => {
-                    initialData[emp.id] = run.employeeData?.[emp.id] || {
-                        baseSalary: emp.compensation?.includes('/year') ? parseFloat(emp.compensation.replace(/[^0-9.]/g, '')) / 12 : 0,
-                        overtime: 0,
-                        bonuses: 0,
-                        benefits: 0,
-                        cnss: 0,
-                        amo: 0,
-                        ir: 0,
-                        otherDeductions: 0,
-                    };
-                });
-                setEmployeeData(initialData);
-            }
-        } else {
-            navigate('/payroll');
+    const subscription = subscribeToPayrollRun(runId, (run) => {
+      if (run) {
+        setPayrollRun({ ...run, periodLabel: run.period_label });
+
+        if (employees.length > 0 && Object.keys(employeeData).length === 0) {
+          const initialData = {};
+          employees.forEach(emp => {
+            initialData[emp.id] = run.employee_data?.[emp.id] || {
+              baseSalary: emp.compensation?.includes('/year') ? parseFloat(emp.compensation.replace(/[^0-9.]/g, '')) / 12 : 0,
+              overtime: 0,
+              bonuses: 0,
+              benefits: 0,
+              cnss: 0,
+              amo: 0,
+              ir: 0,
+              otherDeductions: 0,
+            };
+          });
+          setEmployeeData(initialData);
         }
-        setLoading(false);
+      } else {
+        navigate('/payroll');
+      }
+      setLoading(false);
     });
-    return () => unsubscribe();
-  }, [runId, companyId, employees, navigate]);
+    return () => {
+      if (subscription && typeof subscription.unsubscribe === 'function') {
+        subscription.unsubscribe();
+      }
+    };
+  }, [runId, employees, navigate]);
 
   const handleDataChange = useCallback((empId, field, value) => {
     setEmployeeData(prev => ({
-        ...prev,
-        [empId]: {
-            ...prev[empId],
-            [field]: Number(value) || 0
-        }
+      ...prev,
+      [empId]: {
+        ...prev[empId],
+        [field]: Number(value) || 0
+      }
     }));
   }, []);
 
@@ -66,38 +67,39 @@ function RunPayroll() {
     let totalGross = 0;
     let totalNet = 0;
     Object.keys(employeeData).forEach(empId => {
-        const data = employeeData[empId];
-        const grossPay = (data.baseSalary || 0) + (data.overtime || 0) + (data.bonuses || 0) + (data.benefits || 0);
-        const totalDeductions = (data.cnss || 0) + (data.amo || 0) + (data.ir || 0) + (data.otherDeductions || 0);
-        const netPay = grossPay - totalDeductions;
-        calculated[empId] = { grossPay, netPay };
-        totalGross += grossPay;
-        totalNet += netPay;
+      const data = employeeData[empId];
+      const grossPay = (data.baseSalary || 0) + (data.overtime || 0) + (data.bonuses || 0) + (data.benefits || 0);
+      const totalDeductions = (data.cnss || 0) + (data.amo || 0) + (data.ir || 0) + (data.otherDeductions || 0);
+      const netPay = grossPay - totalDeductions;
+      calculated[empId] = { grossPay, netPay };
+      totalGross += grossPay;
+      totalNet += netPay;
     });
     return { employeeTotals: calculated, companyTotals: { totalGross, totalNet } };
   }, [employeeData]);
 
   const handleSaveDraft = async () => {
-    if (!companyId) return;
     setIsSaving(true);
-    const runRef = doc(db, 'companies', companyId, 'payrollRuns', runId);
-    await updateDoc(runRef, { employeeData });
-    setIsSaving(false);
+    try {
+      await savePayrollDraft(runId, employeeData);
+    } catch (error) {
+      console.error("Failed to save draft:", error);
+    } finally {
+      setIsSaving(false);
+    }
   };
   
   const handleFinalize = async () => {
-      if (!companyId) return;
-      if (!window.confirm("Are you sure you want to finalize this payroll run? This action cannot be undone.")) return;
-      setIsSaving(true);
-      const runRef = doc(db, 'companies', companyId, 'payrollRuns', runId);
-      await updateDoc(runRef, {
-          employeeData,
-          status: 'Finalized',
-          totalGrossPay: calculatedData.companyTotals.totalGross,
-          totalNetPay: calculatedData.companyTotals.totalNet,
-          finalizedAt: serverTimestamp()
-      });
+    if (!window.confirm("Are you sure you want to finalize this payroll run? This action cannot be undone.")) return;
+    setIsSaving(true);
+    try {
+      await finalizePayroll(runId, employeeData, calculatedData.companyTotals);
       navigate(`/payroll/records/${runId}`);
+    } catch (error) {
+      console.error("Failed to finalize payroll:", error);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   if (loading || employeesLoading) { return <div className="p-8">Loading Payroll Worksheet...</div>; }

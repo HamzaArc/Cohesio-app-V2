@@ -150,6 +150,43 @@ export const addHistoryLog = async (requestId, action) => {
 };
 
 /**
+ * Subscribes to the history of a specific time off request.
+ * @param {string} requestId - The ID of the time off request.
+ * @param {function} callback - The function to call with the history data.
+ * @returns {object} - The Supabase subscription channel.
+ */
+export const subscribeToRequestHistory = (requestId, callback) => {
+  const fetchHistory = async () => {
+    const { data, error } = await supabase
+      .from('time_off_request_history')
+      .select('*')
+      .eq('request_id', requestId)
+      .order('timestamp', { ascending: true });
+
+    if (error) {
+      console.error('Error fetching request history:', error);
+    } else {
+      callback(data);
+    }
+  };
+
+  const channel = supabase
+    .channel(`request_history:${requestId}`)
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'time_off_request_history', filter: `request_id=eq.${requestId}` },
+      () => fetchHistory()
+    )
+    .subscribe((status) => {
+      if (status === 'SUBSCRIBED') {
+        fetchHistory();
+      }
+    });
+
+  return channel;
+};
+
+/**
  * Executes the manual balance reset for all employees in a company.
  * @param {string} companyId - The ID of the company.
  * @param {object} resetPolicy - The current reset policy object.

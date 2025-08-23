@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { db } from '../firebase';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { Save } from 'lucide-react';
 import { useAppContext } from '../contexts/AppContext';
+import { getPayrollSettings, savePayrollSettings } from '../services/payrollService';
 
 function PayrollSettings() {
   const { companyId } = useAppContext();
@@ -22,10 +21,10 @@ function PayrollSettings() {
       return;
     }
     const fetchSettings = async () => {
-      const docRef = doc(db, 'companies', companyId, 'policies', 'payroll');
-      const docSnap = await getDoc(docRef);
-      if (docSnap.exists()) {
-        setSettings(docSnap.data());
+      setLoading(true);
+      const fetchedSettings = await getPayrollSettings(companyId);
+      if (fetchedSettings) {
+        setSettings(fetchedSettings);
       }
       setLoading(false);
     };
@@ -37,8 +36,7 @@ function PayrollSettings() {
     setIsSaving(true);
     setSaveSuccess(false);
     try {
-      const docRef = doc(db, 'companies', companyId, 'policies', 'payroll');
-      await setDoc(docRef, settings, { merge: true });
+      await savePayrollSettings(companyId, settings);
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 2000);
     } catch (error) {

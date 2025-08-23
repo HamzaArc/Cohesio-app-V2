@@ -1,22 +1,29 @@
 import React, { useState, useEffect } from 'react';
-import { db, auth } from '../firebase';
-import { collection, query, orderBy, onSnapshot } from 'firebase/firestore';
 import { X, CheckCircle, XCircle, Send, Calendar, RotateCcw, Trash2 } from 'lucide-react';
+import { useAppContext } from '../contexts/AppContext';
+import { subscribeToRequestHistory } from '../services/timeOffService';
 
 const DetailField = ({ label, value }) => ( <div><p className="text-sm text-gray-500">{label}</p><p className="font-semibold text-gray-800">{value}</p></div> );
 const HistoryItem = ({ icon, title, date, isLast }) => ( <div className="relative pl-8">{!isLast && <div className="absolute left-[7px] top-5 h-full w-0.5 bg-gray-200"></div>}<div className="absolute left-0 top-0 flex h-4 w-4 items-center justify-center rounded-full bg-white">{icon}</div><p className="font-semibold text-gray-700">{title}</p><p className="text-xs text-gray-500">{date}</p></div> );
 
 function RequestDetailsModal({ isOpen, onClose, request, onWithdraw, onReschedule }) {
   const [history, setHistory] = useState([]);
-  const currentUser = auth.currentUser;
+  const { currentUser } = useAppContext();
 
   useEffect(() => {
     if (isOpen && request) {
-      const historyQuery = query(collection(db, 'timeOffRequests', request.id, 'history'), orderBy('timestamp', 'asc'));
-      const unsubscribe = onSnapshot(historyQuery, (snapshot) => {
-        setHistory(snapshot.docs.map(doc => ({ ...doc.data(), timestamp: doc.data().timestamp?.toDate().toLocaleString() })));
+      const subscription = subscribeToRequestHistory(request.id, (historyData) => {
+        const formattedHistory = historyData.map(item => ({
+          ...item,
+          timestamp: new Date(item.timestamp).toLocaleString()
+        }));
+        setHistory(formattedHistory);
       });
-      return () => unsubscribe();
+      return () => {
+        if (subscription && typeof subscription.unsubscribe === 'function') {
+          subscription.unsubscribe();
+        }
+      };
     }
   }, [isOpen, request]);
 

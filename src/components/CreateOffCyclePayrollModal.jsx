@@ -1,11 +1,10 @@
 import React, { useState } from 'react';
-import { db } from '../firebase';
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { X, Plus, Trash2 } from 'lucide-react';
-import { useAppContext } from '../contexts/AppContext'; // Import our new hook
+import { useAppContext } from '../contexts/AppContext';
+import { createOffCyclePayroll } from '../services/payrollService';
 
 function CreateOffCyclePayrollModal({ isOpen, onClose, onPayrollRun }) {
-  const { employees } = useAppContext(); // Use the App Brain
+  const { employees, companyId } = useAppContext();
   const [selectedEmployee, setSelectedEmployee] = useState(null);
   const [payDay, setPayDay] = useState('');
   const [reason, setReason] = useState('Final Pay');
@@ -35,24 +34,8 @@ function CreateOffCyclePayrollModal({ isOpen, onClose, onPayrollRun }) {
     setError('');
 
     try {
-      const grossPay = lineItems.reduce((sum, item) => sum + (Number(item.total) || 0), 0);
-      
-      await addDoc(collection(db, 'payrollRuns'), {
-        payPeriodId: `off-cycle-${Date.now()}`,
-        periodSpans: `Off-Cycle: ${reason}`,
-        payDay,
-        totalGrossPay: grossPay,
-        totalNetPay: grossPay, // Placeholder
-        employeePayData: [{
-            employeeId: selectedEmployee.id,
-            employeeName: selectedEmployee.name,
-            lineItems: lineItems.map(({id, ...rest}) => rest)
-        }],
-        runAt: serverTimestamp(),
-        type: 'Off-Cycle'
-      });
-      
-      onPayrollRun();
+      await createOffCyclePayroll(companyId, { selectedEmployee, payDay, reason, lineItems });
+      onPayrollRun(); // This should trigger a refetch in the parent component
       handleClose();
     } catch (err) {
       setError('Failed to run off-cycle payroll.');

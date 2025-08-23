@@ -1,40 +1,65 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { db } from '../firebase';
-import { doc, onSnapshot } from 'firebase/firestore';
 import Payslip from '../components/Payslip'; 
 import { useAppContext } from '../contexts/AppContext';
+import { subscribeToPayrollRun, getPayrollSettings } from '../services/payrollService';
 
 function PayrollDetails() {
   const { runId } = useParams();
   const { employees, companyId } = useAppContext();
   const [payrollRun, setPayrollRun] = useState(null);
+  const [payrollSettings, setPayrollSettings] = useState(null);
   const [selectedEmployeeId, setSelectedEmployeeId] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!runId || !companyId) { 
-        setLoading(false); 
-        return; 
-    }
-    const runRef = doc(db, 'companies', companyId, 'payrollRuns', runId);
-    const unsubscribe = onSnapshot(runRef, (docSnap) => {
-      if (docSnap.exists()) {
-        const runData = { id: docSnap.id, ...docSnap.data() };
-        setPayrollRun(runData);
-        if (!selectedEmployeeId && Object.keys(runData.employeeData).length > 0) {
-            setSelectedEmployeeId(Object.keys(runData.employeeData)[0]);
-        }
-      } else { console.error("Payroll run not found!"); }
+    if (!runId || !companyId) {
       setLoading(false);
+      return;
+    }
+
+    let isMounted = true;
+
+    const fetchSettings = async () => {
+      const settings = await getPayrollSettings(companyId);
+      if (isMounted) {
+        setPayrollSettings(settings);
+      }
+    };
+
+    fetchSettings();
+
+    const subscription = subscribeToPayrollRun(runId, (runData) => {
+      if (isMounted) {
+        if (runData) {
+          const formattedRun = {
+            ...runData,
+            periodLabel: runData.period_label,
+            employeeData: runData.employee_data || {},
+          };
+          setPayrollRun(formattedRun);
+          if (!selectedEmployeeId && formattedRun.employeeData && Object.keys(formattedRun.employeeData).length > 0) {
+            setSelectedEmployeeId(Object.keys(formattedRun.employeeData)[0]);
+          }
+        } else {
+          console.error("Payroll run not found!");
+        }
+        setLoading(false);
+      }
     });
-    return () => unsubscribe();
+
+    return () => {
+      isMounted = false;
+      if (subscription && typeof subscription.unsubscribe === 'function') {
+        subscription.unsubscribe();
+      }
+    };
   }, [runId, companyId, selectedEmployeeId]);
 
   if (loading) { return <div className="p-8">Loading Payroll Record...</div>; }
   if (!payrollRun) { return <div className="p-8">Payroll Record not found.</div>; }
 
-  const selectedEmployeePayslipData = payrollRun.employeeData[selectedEmployeeId];
+  const selectedEmployeePayslipData = payrollRun.employeeData?.[selectedEmployeeId];
   const selectedEmployeeProfile = employees.find(emp => emp.id === selectedEmployeeId);
 
   return (
@@ -63,8 +88,8 @@ function PayrollDetails() {
           </div>
         </div>
         <div className="lg:col-span-2">
-          {selectedEmployeePayslipData && selectedEmployeeProfile ? (
-            <Payslip payrollRun={payrollRun} employeeData={selectedEmployeePayslipData} employeeProfile={selectedEmployeeProfile} />
+          {selectedEmployeePayslipData && selectedEmployeeProfile && payrollSettings ? (
+            <Payslip payrollRun={payrollRun} employeeData={selectedEmployeePayslipData} employeeProfile={selectedEmployeeProfile} companyInfo={payrollSettings} />
           ) : (
             <div className="flex items-center justify-center h-96 bg-gray-50 rounded-lg border-2 border-dashed border-gray-300">
               <p className="text-gray-500">Select an employee to view their payslip.</p>
