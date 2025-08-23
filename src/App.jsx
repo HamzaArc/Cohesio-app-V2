@@ -22,10 +22,10 @@ import Privacy from './pages/Privacy';
 import Terms from './pages/Terms';
 
 // --- Out-of-scope pages are now fully commented out ---
-// import Payroll from './pages/Payroll';
-// import RunPayroll from './pages/RunPayroll';
-// import PayrollDetails from './pages/PayrollDetails';
-// import TimeOff from './pages/TimeOff';
+import Payroll from './pages/Payroll';
+import RunPayroll from './pages/RunPayroll';
+import PayrollDetails from './pages/PayrollDetails';
+import TimeOff from './pages/TimeOff';
 // import Surveys from './pages/Surveys';
 // import SurveyStudio from './pages/SurveyStudio';
 // import TakeSurvey from './pages/TakeSurvey'; 
@@ -79,8 +79,10 @@ function App() {
           <Route path="people/:employeeId" element={<EmployeeProfile />} />
 
           {/* --- Out-of-scope routes remain commented out --- */}
-          {/* <Route path="payroll" element={<Payroll />} /> */}
-          {/* <Route path="time-off" element={<TimeOff />} /> */}
+          <Route path="payroll" element={<Payroll />} />
+          <Route path="payroll/run/:runId" element={<RunPayroll />} />
+          <Route path="payroll/records/:runId" element={<PayrollDetails />} />
+          <Route path="time-off" element={<TimeOff />} />
           {/* <Route path="surveys" element={<Surveys />} /> */}
           {/* <Route path="documents" element={<Documents />} /> */}
           {/* <Route path="training" element={<Training />} /> */}
