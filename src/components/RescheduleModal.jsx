@@ -1,13 +1,31 @@
 import React, { useState, useEffect } from 'react';
-import { db } from '../firebase';
-import { doc, updateDoc, writeBatch, collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { X, AlertCircle } from 'lucide-react';
+import { rescheduleTimeOffRequest } from '../services/timeOffService';
+
+// Helper function to calculate business days (assuming weekends/holidays are passed as props if needed)
+// For now, let's assume a simple version. A more robust implementation would share this logic from a utility file.
+const calculateBusinessDays = (startDate, endDate) => {
+  if (!startDate || !endDate) return 0;
+  let start = new Date(startDate);
+  let end = new Date(endDate);
+  let count = 0;
+  const curDate = new Date(start.getTime());
+  while (curDate <= end) {
+    const dayOfWeek = curDate.getDay();
+    if (dayOfWeek !== 0 && dayOfWeek !== 6) { // Exclude Sunday and Saturday
+      count++;
+    }
+    curDate.setDate(curDate.getDate() + 1);
+  }
+  return count;
+}
 
 function RescheduleModal({ isOpen, onClose, request, onRescheduled }) {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [totalDays, setTotalDays] = useState(0);
 
   useEffect(() => {
     if (request) {
@@ -15,6 +33,17 @@ function RescheduleModal({ isOpen, onClose, request, onRescheduled }) {
       setEndDate(request.endDate);
     }
   }, [request]);
+
+  useEffect(() => {
+    if (startDate && endDate && new Date(endDate) >= new Date(startDate)) {
+      // In a real app, you'd pass weekends and holidays here
+      const days = calculateBusinessDays(startDate, endDate);
+      setTotalDays(days);
+      setError('');
+    } else {
+      setTotalDays(0);
+    }
+  }, [startDate, endDate]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -26,22 +55,7 @@ function RescheduleModal({ isOpen, onClose, request, onRescheduled }) {
     setError('');
 
     try {
-      const batch = writeBatch(db);
-
-      const requestRef = doc(db, 'timeOffRequests', request.id);
-      batch.update(requestRef, {
-        startDate,
-        endDate,
-        status: 'Pending', // Set status back to Pending
-      });
-
-      const historyColRef = collection(db, 'timeOffRequests', request.id, 'history');
-      batch.set(doc(historyColRef), {
-          action: 'Rescheduled',
-          timestamp: serverTimestamp(),
-      });
-
-      await batch.commit();
+      await rescheduleTimeOffRequest(request.id, startDate, endDate, totalDays);
       onRescheduled();
       onClose();
     } catch (err) {

@@ -175,6 +175,27 @@ export const runManualBalanceReset = async (companyId, resetPolicy) => {
     return data;
 };
 
+/**
+ * Reschedules a time off request.
+ * @param {string} requestId - The ID of the request to reschedule.
+ * @param {string} newStartDate - The new start date.
+ * @param {string} newEndDate - The new end date.
+ * @param {number} newTotalDays - The recalculated number of business days.
+ */
+export const rescheduleTimeOffRequest = async (requestId, newStartDate, newEndDate, newTotalDays) => {
+    const { error } = await supabase.rpc('reschedule_time_off_request', {
+        p_request_id: requestId,
+        p_new_start_date: newStartDate,
+        p_new_end_date: newEndDate,
+        p_new_total_days: newTotalDays
+    });
+
+    if (error) {
+        console.error('Error rescheduling request:', error);
+        throw error;
+    }
+};
+
 // Note: The RPC functions (`create_time_off_request_and_update_balance`, etc.)
 // need to be created in the Supabase SQL Editor. I will provide the SQL for these separately.
 
