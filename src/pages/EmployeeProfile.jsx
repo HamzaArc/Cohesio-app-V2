@@ -1,8 +1,9 @@
+// src/pages/EmployeeProfile.jsx
+
 import React, { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { Edit2, Trash2, Plus, DollarSign, ArrowUp, Briefcase, User, Users, Home, Phone, Shield, Plane, Heart, Sun } from 'lucide-react';
-import { db } from '../firebase';
-import { doc, onSnapshot, deleteDoc, collection, query, orderBy } from 'firebase/firestore';
+import { supabase } from '../supabaseClient'; // UPDATED: Import Supabase
 import { useAppContext } from '../contexts/AppContext';
 import EditEmployeeModal from '../components/EditEmployeeModal';
 import DeleteConfirmationModal from '../components/DeleteConfirmationModal';
@@ -40,34 +41,56 @@ function EmployeeProfile() {
   const { employeeId } = useParams();
   const navigate = useNavigate();
 
+  // SUPABASE DATA FETCHING
   useEffect(() => {
     if (!employeeId || !companyId) return;
 
-    setLoading(true);
-    const docRef = doc(db, 'companies', companyId, 'employees', employeeId);
-    const unsubscribeEmployee = onSnapshot(docRef, (docSnap) => {
-      if (docSnap.exists()) setEmployee({ id: docSnap.id, ...docSnap.data() });
-      else setEmployee(null);
-      setLoading(false);
-    });
+    const fetchEmployeeData = async () => {
+        setLoading(true);
+        // Fetch the specific employee's record
+        const { data: employeeData, error: employeeError } = await supabase
+            .from('employees')
+            .select('*')
+            .eq('id', employeeId)
+            .single();
 
-    const journeyColRef = collection(db, 'companies', companyId, 'employees', employeeId, 'journey');
-    const q = query(journeyColRef, orderBy('date', 'desc'));
-    const unsubscribeJourney = onSnapshot(q, (snapshot) => {
-      setJourney(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    });
+        if (employeeError) {
+            console.error("Error fetching employee:", employeeError);
+            setEmployee(null);
+        } else {
+            setEmployee(employeeData);
+        }
 
-    return () => {
-      unsubscribeEmployee();
-      unsubscribeJourney();
+        // Fetch the employee's journey events
+        const { data: journeyData, error: journeyError } = await supabase
+            .from('employee_journey')
+            .select('*')
+            .eq('employee_id', employeeId)
+            .order('date', { ascending: false });
+
+        if (journeyError) {
+            console.error("Error fetching journey:", journeyError);
+        } else {
+            setJourney(journeyData);
+        }
+        
+        setLoading(false);
     };
+
+    fetchEmployeeData();
   }, [employeeId, companyId]);
 
+  // SUPABASE DELETE LOGIC
   const handleDelete = async () => {
     if (!companyId) return;
     setIsDeleting(true);
     try {
-      await deleteDoc(doc(db, 'companies', companyId, 'employees', employeeId));
+      const { error } = await supabase
+        .from('employees')
+        .delete()
+        .eq('id', employeeId);
+      
+      if (error) throw error;
       navigate('/people');
     } catch (err) {
       console.error('Error deleting employee:', err);
@@ -133,11 +156,12 @@ function EmployeeProfile() {
             <div className="mt-6">
               {activeTab === 'Job' && (
                 <div className="space-y-6">
+                  {/* UPDATED: Field names changed to snake_case */}
                   <InfoSection title="Employment Details" onEdit={() => setIsEditModalOpen(true)}>
                     <InfoField icon={<Briefcase size={16} />} label="Position" value={employee.position} />
                     <InfoField icon={<Users size={16} />} label="Department" value={employee.department} />
-                    <InfoField icon={<Briefcase size={16} />} label="Employment Type" value={employee.employmentType} />
-                    <InfoField icon={<Users size={16} />} label="Reports To" value={employee.managerEmail} />
+                    <InfoField icon={<Briefcase size={16} />} label="Employment Type" value={employee.employment_type} />
+                    <InfoField icon={<Users size={16} />} label="Reports To" value={employee.manager_email} />
                   </InfoSection>
                   <InfoSection title="Compensation" onEdit={() => setIsEditModalOpen(true)}>
                     <InfoField icon={<DollarSign size={16} />} label="Pay Rate" value={employee.compensation} />
@@ -150,19 +174,21 @@ function EmployeeProfile() {
                     <InfoField icon={<Phone size={16} />} label="Phone (Work)" value={employee.phone} />
                     <InfoField icon={<Home size={16} />} label="Address" value={employee.address} />
                   </InfoSection>
+                  {/* UPDATED: Field names changed to snake_case */}
                   <InfoSection title="Emergency Contact" onEdit={() => setIsEditModalOpen(true)}>
-                    <InfoField icon={<User size={16} />} label="Contact Name" value={employee.emergencyContactName} />
-                    <InfoField icon={<Shield size={16} />} label="Relationship" value={employee.emergencyContactRelationship} />
-                    <InfoField icon={<Phone size={16} />} label="Contact Phone" value={employee.emergencyContactPhone} />
+                    <InfoField icon={<User size={16} />} label="Contact Name" value={employee.emergency_contact_name} />
+                    <InfoField icon={<Shield size={16} />} label="Relationship" value={employee.emergency_contact_relationship} />
+                    <InfoField icon={<Phone size={16} />} label="Contact Phone" value={employee.emergency_contact_phone} />
                   </InfoSection>
                 </div>
               )}
               {activeTab === 'Time Off' && (
                 <div className="space-y-6">
+                  {/* UPDATED: Field names changed to snake_case */}
                   <InfoSection title="Time Off Balances" onEdit={() => setIsEditModalOpen(true)}>
-                    <InfoField icon={<Plane size={16} />} label="Vacation" value={`${employee.vacationBalance} days`} />
-                    <InfoField icon={<Heart size={16} />} label="Sick Days" value={`${employee.sickBalance} days`} />
-                    <InfoField icon={<Sun size={16} />} label="Personal Days" value={`${employee.personalBalance} days`} />
+                    <InfoField icon={<Plane size={16} />} label="Vacation" value={`${employee.vacation_balance} days`} />
+                    <InfoField icon={<Heart size={16} />} label="Sick Days" value={`${employee.sick_balance} days`} />
+                    <InfoField icon={<Sun size={16} />} label="Personal Days" value={`${employee.personal_balance} days`} />
                   </InfoSection>
                 </div>
               )}

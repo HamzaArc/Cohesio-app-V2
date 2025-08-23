@@ -1,15 +1,16 @@
+// src/pages/People.jsx
+
 import React, { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { Plus, Search, Edit, Trash, Users, UserPlus, Share2, Mail } from 'lucide-react';
-import { db } from '../firebase';
-import { doc, deleteDoc } from 'firebase/firestore';
+import { supabase } from '../supabaseClient'; // UPDATED: Import Supabase client
 import { useAppContext } from '../contexts/AppContext';
 import AddEmployeeModal from '../components/AddEmployeeModal';
 import EditEmployeeModal from '../components/EditEmployeeModal';
 import DeleteConfirmationModal from '../components/DeleteConfirmationModal';
 import OrgChart from '../components/OrgChart';
 import StatCard from '../components/StatCard';
-import InviteEmployeeModal from '../components/InviteEmployeeModal'; // Import the new modal
+import InviteEmployeeModal from '../components/InviteEmployeeModal';
 
 const PeopleTab = ({ label, icon, active, onClick }) => ( <button onClick={onClick} className={`flex items-center gap-2 py-3 px-4 text-sm font-semibold transition-colors ${ active ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500 hover:text-gray-700' }`}>{icon}{label}</button> );
 
@@ -19,7 +20,7 @@ function People() {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
-  const [isInviteModalOpen, setIsInviteModalOpen] = useState(false); // State for the new modal
+  const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
   const [selectedEmployee, setSelectedEmployee] = useState(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -36,8 +37,8 @@ function People() {
       const today = new Date();
       const firstDayOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
       return allEmployees.filter(emp => {
-          if (!emp.hireDate) return false;
-          const hireDate = new Date(emp.hireDate);
+          if (!emp.hire_date) return false;
+          const hireDate = new Date(emp.hire_date);
           return hireDate >= firstDayOfMonth;
       }).length;
   }, [allEmployees]);
@@ -45,13 +46,22 @@ function People() {
   const handleEditClick = (employee) => { setSelectedEmployee(employee); setIsEditModalOpen(true); };
   const handleDeleteClick = (employee) => { setSelectedEmployee(employee); setIsDeleteModalOpen(true); };
   
+  // SUPABASE DELETE LOGIC
   const handleDeleteConfirm = async () => {
     if (!selectedEmployee || !companyId) return;
     setIsDeleting(true);
     try {
-      await deleteDoc(doc(db, 'companies', companyId, 'employees', selectedEmployee.id));
+      // Delete the employee from the Supabase 'employees' table
+      const { error } = await supabase
+        .from('employees')
+        .delete()
+        .eq('id', selectedEmployee.id);
+      
+      if (error) throw error;
+
       setIsDeleteModalOpen(false);
       setSelectedEmployee(null);
+      // NOTE: The AppContext will automatically refetch and update the UI.
     } catch (err) {
       console.error("Error deleting employee:", err);
     } finally {

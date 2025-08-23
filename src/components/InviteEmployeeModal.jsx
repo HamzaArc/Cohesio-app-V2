@@ -1,6 +1,7 @@
+// src/components/InviteEmployeeModal.jsx
+
 import React, { useState } from 'react';
-import { db } from '../firebase';
-import { collection, addDoc, serverTimestamp, query, where, getDocs } from 'firebase/firestore';
+import { supabase } from '../supabaseClient'; // UPDATED: Import Supabase
 import { X, AtSign } from 'lucide-react';
 import { useAppContext } from '../contexts/AppContext';
 
@@ -10,6 +11,7 @@ function InviteEmployeeModal({ isOpen, onClose, onInvitationSent }) {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
+  // SUPABASE: Send invitation logic
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!email || !companyId) {
@@ -21,32 +23,41 @@ function InviteEmployeeModal({ isOpen, onClose, onInvitationSent }) {
 
     try {
       // Check if user already exists in this company
-      const employeesRef = collection(db, 'companies', companyId, 'employees');
-      const q = query(employeesRef, where('email', '==', email));
-      const existingEmployeeSnap = await getDocs(q);
+      const { data: existingEmployee, error: employeeError } = await supabase
+        .from('employees')
+        .select('id')
+        .eq('company_id', companyId)
+        .eq('email', email)
+        .maybeSingle();
 
-      if (!existingEmployeeSnap.empty) {
+      if (employeeError) throw employeeError;
+      if (existingEmployee) {
         setError('An employee with this email already exists in your company.');
         setLoading(false);
         return;
       }
       
       // Check if an invitation already exists
-      const invitationsRef = collection(db, 'companies', companyId, 'invitations');
-      const qInv = query(invitationsRef, where('email', '==', email));
-      const existingInviteSnap = await getDocs(qInv);
-
-      if (!existingInviteSnap.empty) {
+      const { data: existingInvite, error: inviteError } = await supabase
+        .from('invitations')
+        .select('id')
+        .eq('company_id', companyId)
+        .eq('email', email)
+        .maybeSingle();
+      
+      if (inviteError) throw inviteError;
+      if (existingInvite) {
         setError('An invitation has already been sent to this email address.');
         setLoading(false);
         return;
       }
 
-      await addDoc(invitationsRef, {
-        email: email,
-        status: 'pending',
-        sentAt: serverTimestamp(),
-      });
+      // Insert new invitation
+      const { error: insertError } = await supabase
+        .from('invitations')
+        .insert({ email, company_id: companyId });
+
+      if (insertError) throw insertError;
 
       onInvitationSent();
       handleClose();

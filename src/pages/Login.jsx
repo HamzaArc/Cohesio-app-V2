@@ -1,10 +1,9 @@
+// src/pages/Login.jsx
+
 import React, { useState } from 'react';
-import { auth } from '../firebase';
-import { signInWithEmailAndPassword } from 'firebase/auth';
+import { supabase } from '../supabaseClient'; // UPDATED: Import Supabase client
 import { useNavigate, Link } from 'react-router-dom';
 import { Lock, AtSign, CheckCircle, Shield, BarChart2, Cpu } from 'lucide-react';
-
-// Import the new click arrow icon
 import clickArrowIcon from '../assets/images/click-arrow.png';
 
 const FeatureHighlight = ({ icon, title, children }) => (
@@ -28,12 +27,20 @@ function Login() {
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
+  // SUPABASE LOGIN LOGIC
   const handleLogin = async (e) => {
     e.preventDefault();
     setLoading(true);
     setError('');
     try {
-      await signInWithEmailAndPassword(auth, email, password);
+      // Use Supabase's signInWithPassword function
+      const { error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+
+      if (error) throw error;
+
       navigate('/');
     } catch (err) {
       setError('Failed to log in. Please check your email and password.');
@@ -45,6 +52,7 @@ function Login() {
 
   return (
     <div className="min-h-screen bg-white flex">
+      {/* --- JSX is unchanged --- */}
       <div className="hidden lg:flex lg:w-1/2 bg-primary p-12 flex-col justify-between relative">
         <div className="relative">
           <Link to="/landing" className="text-white text-2xl font-bold">
@@ -54,7 +62,6 @@ function Login() {
             <p className="text-sm italic text-white/60 w-40">
               Click the logo to return to the main page
             </p>
-            {/* Replaced SVG with the new image icon */}
             <img 
               src={clickArrowIcon} 
               alt="Arrow pointing to logo" 

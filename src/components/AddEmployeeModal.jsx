@@ -1,11 +1,11 @@
+// src/components/AddEmployeeModal.jsx
+
 import React, { useState, useEffect } from 'react';
-import { db } from '../firebase';
-import { collection, addDoc, getDocs } from 'firebase/firestore';
+import { supabase } from '../supabaseClient'; // UPDATED: Import Supabase client
 import { X, AlertCircle } from 'lucide-react';
-import DatalistInput from './DatalistInput'; // Import the new component
+import DatalistInput from './DatalistInput';
 import { useAppContext } from '../contexts/AppContext';
 
-// A reusable input component with validation display
 const ValidatedInput = ({ id, label, value, onChange, error, ...props }) => (
     <div>
         <label htmlFor={id} className="block text-sm font-medium text-gray-700">{label}</label>
@@ -21,33 +21,25 @@ const ValidatedInput = ({ id, label, value, onChange, error, ...props }) => (
 );
 
 function AddEmployeeModal({ isOpen, onClose, onEmployeeAdded }) {
-  const { companyId } = useAppContext();
+  const { companyId, employees: allEmployees } = useAppContext(); // UPDATED: Get employees from context
   const [formData, setFormData] = useState({
-    name: '', email: '', position: '', department: '', hireDate: '', status: 'active',
-    phone: '', address: '', gender: '', compensation: '', employmentType: 'Full-time',
-    vacationBalance: 15, sickBalance: 5, personalBalance: 3,
-    managerEmail: '',
-    emergencyContactName: '', emergencyContactRelationship: '', emergencyContactPhone: '',
+    name: '', email: '', position: '', department: '', hire_date: '', status: 'active',
+    phone: '', address: '', gender: '', compensation: '', employment_type: 'Full-time',
+    vacation_balance: 15, sick_balance: 5, personal_balance: 3,
+    manager_email: '',
+    emergency_contact_name: '', emergency_contact_relationship: '', emergency_contact_phone: '',
   });
   const [errors, setErrors] = useState({});
-  const [allEmployees, setAllEmployees] = useState([]);
   const [departments, setDepartments] = useState([]);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (isOpen && companyId) {
-      const fetchData = async () => {
-        const snapshot = await getDocs(collection(db, 'companies', companyId, 'employees'));
-        const employeesList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        setAllEmployees(employeesList);
-
-        // Extract unique department names
-        const deptSet = new Set(employeesList.map(emp => emp.department).filter(Boolean));
+    if (isOpen) {
+        // Extract unique department names from existing employees
+        const deptSet = new Set(allEmployees.map(emp => emp.department).filter(Boolean));
         setDepartments([...deptSet]);
-      };
-      fetchData();
     }
-  }, [isOpen, companyId]);
+  }, [isOpen, allEmployees]);
 
   const validate = (data = formData) => {
       const newErrors = {};
@@ -58,7 +50,7 @@ function AddEmployeeModal({ isOpen, onClose, onEmployeeAdded }) {
           newErrors.email = 'Email address is invalid.';
       }
       if (!data.position) newErrors.position = 'Position is required.';
-      if (!data.hireDate) newErrors.hireDate = 'Hire date is required.';
+      if (!data.hire_date) newErrors.hire_date = 'Hire date is required.';
       if (data.phone && !/^[0-9\s+()-]*$/.test(data.phone)) {
         newErrors.phone = 'Invalid phone number format.';
       }
@@ -74,6 +66,7 @@ function AddEmployeeModal({ isOpen, onClose, onEmployeeAdded }) {
     validate(newFormData);
   };
 
+  // SUPABASE INSERT LOGIC
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!validate() || !companyId) {
@@ -82,12 +75,17 @@ function AddEmployeeModal({ isOpen, onClose, onEmployeeAdded }) {
     setLoading(true);
 
     try {
-      await addDoc(collection(db, 'companies', companyId, 'employees'), {
+      // Insert a new record into the 'employees' table
+      const { error } = await supabase.from('employees').insert({
         ...formData,
-        vacationBalance: Number(formData.vacationBalance) || 0,
-        sickBalance: Number(formData.sickBalance) || 0,
-        personalBalance: Number(formData.personalBalance) || 0,
+        company_id: companyId, // Add the company_id foreign key
+        vacation_balance: Number(formData.vacation_balance) || 0,
+        sick_balance: Number(formData.sick_balance) || 0,
+        personal_balance: Number(formData.personal_balance) || 0,
       });
+
+      if (error) throw error;
+      
       onEmployeeAdded();
       handleClose();
     } catch (err) {
@@ -100,10 +98,10 @@ function AddEmployeeModal({ isOpen, onClose, onEmployeeAdded }) {
 
   const handleClose = () => {
     setFormData({
-        name: '', email: '', position: '', department: '', hireDate: '', status: 'active',
-        phone: '', address: '', gender: '', compensation: '', employmentType: 'Full-time',
-        vacationBalance: 15, sickBalance: 5, personalBalance: 3, managerEmail: '',
-        emergencyContactName: '', emergencyContactRelationship: '', emergencyContactPhone: '',
+        name: '', email: '', position: '', department: '', hire_date: '', status: 'active',
+        phone: '', address: '', gender: '', compensation: '', employment_type: 'Full-time',
+        vacation_balance: 15, sick_balance: 5, personal_balance: 3, manager_email: '',
+        emergency_contact_name: '', emergency_contact_relationship: '', emergency_contact_phone: '',
     });
     setErrors({});
     onClose();
@@ -133,27 +131,32 @@ function AddEmployeeModal({ isOpen, onClose, onEmployeeAdded }) {
             
             <DatalistInput id="department" label="Department" value={formData.department} onChange={handleChange} error={errors.department} options={departments} type="text" placeholder="Select or type to create new"/>
 
-            <ValidatedInput id="hireDate" label="Hire Date" value={formData.hireDate} onChange={handleChange} error={errors.hireDate} type="date" required />
+            {/* UPDATED: id changed to match database schema */}
+            <ValidatedInput id="hire_date" label="Hire Date" value={formData.hire_date} onChange={handleChange} error={errors.hire_date} type="date" required />
             <div>
               <label htmlFor="status" className="block text-sm font-medium text-gray-700">Status</label>
               <select id="status" value={formData.status} onChange={handleChange} className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2"><option value="active">Active</option><option value="onboarding">Onboarding</option></select>
             </div>
-            <ValidatedInput id="employmentType" label="Employment Type" value={formData.employmentType} onChange={handleChange} error={errors.employmentType} type="text" />
+            {/* UPDATED: id changed to match database schema */}
+            <ValidatedInput id="employment_type" label="Employment Type" value={formData.employment_type} onChange={handleChange} error={errors.employment_type} type="text" />
             <ValidatedInput id="compensation" label="Compensation" value={formData.compensation} onChange={handleChange} error={errors.compensation} type="text" placeholder="e.g., 50000 / year" />
             <div className="md:col-span-2">
-                <label htmlFor="managerEmail" className="block text-sm font-medium text-gray-700">Reports To</label>
-                <select id="managerEmail" value={formData.managerEmail} onChange={handleChange} className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2"><option value="">No Manager</option>{allEmployees.map(emp => <option key={emp.id} value={emp.email}>{emp.name}</option>)}</select>
+                {/* UPDATED: id changed to match database schema */}
+                <label htmlFor="manager_email" className="block text-sm font-medium text-gray-700">Reports To</label>
+                <select id="manager_email" value={formData.manager_email} onChange={handleChange} className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2"><option value="">No Manager</option>{allEmployees.map(emp => <option key={emp.id} value={emp.email}>{emp.name}</option>)}</select>
             </div>
 
             <h3 className="md:col-span-2 text-lg font-semibold text-gray-700 border-b pb-2 mt-4">Emergency Contact</h3>
-            <ValidatedInput id="emergencyContactName" label="Contact Name" value={formData.emergencyContactName} onChange={handleChange} error={errors.emergencyContactName} type="text" />
-            <ValidatedInput id="emergencyContactRelationship" label="Relationship" value={formData.emergencyContactRelationship} onChange={handleChange} error={errors.emergencyContactRelationship} type="text" />
-            <ValidatedInput id="emergencyContactPhone" label="Contact Phone" value={formData.emergencyContactPhone} onChange={handleChange} error={errors.emergencyContactPhone} type="tel" />
+            {/* UPDATED: ids changed to match database schema */}
+            <ValidatedInput id="emergency_contact_name" label="Contact Name" value={formData.emergency_contact_name} onChange={handleChange} error={errors.emergency_contact_name} type="text" />
+            <ValidatedInput id="emergency_contact_relationship" label="Relationship" value={formData.emergency_contact_relationship} onChange={handleChange} error={errors.emergency_contact_relationship} type="text" />
+            <ValidatedInput id="emergency_contact_phone" label="Contact Phone" value={formData.emergency_contact_phone} onChange={handleChange} error={errors.emergency_contact_phone} type="tel" />
             
             <h3 className="md:col-span-2 text-lg font-semibold text-gray-700 border-b pb-2 mt-4">Time Off Balances (Days)</h3>
-            <ValidatedInput id="vacationBalance" label="Vacation" value={formData.vacationBalance} onChange={handleChange} error={errors.vacationBalance} type="number" />
-            <ValidatedInput id="sickBalance" label="Sick" value={formData.sickBalance} onChange={handleChange} error={errors.sickBalance} type="number" />
-            <ValidatedInput id="personalBalance" label="Personal" value={formData.personalBalance} onChange={handleChange} error={errors.personalBalance} type="number" />
+            {/* UPDATED: ids changed to match database schema */}
+            <ValidatedInput id="vacation_balance" label="Vacation" value={formData.vacation_balance} onChange={handleChange} error={errors.vacation_balance} type="number" />
+            <ValidatedInput id="sick_balance" label="Sick" value={formData.sick_balance} onChange={handleChange} error={errors.sick_balance} type="number" />
+            <ValidatedInput id="personal_balance" label="Personal" value={formData.personal_balance} onChange={handleChange} error={errors.personal_balance} type="number" />
           </div>
           {errors.form && <p className="text-red-500 text-sm mt-4 text-center">{errors.form}</p>}
           <div className="mt-8 pt-6 border-t flex justify-end">

@@ -1,6 +1,7 @@
+// src/pages/Profile.jsx
+
 import React, { useState, useEffect } from 'react';
-import { auth, db } from '../firebase';
-import { collection, query, where, onSnapshot } from 'firebase/firestore';
+import { supabase } from '../supabaseClient'; // UPDATED: Import Supabase client
 import { Edit2, DollarSign, Briefcase, User, Users, Home, Phone, Shield, Plane, Heart, Sun } from 'lucide-react';
 import EditEmployeeModal from '../components/EditEmployeeModal';
 import OnboardingPlan from '../components/OnboardingPlan';
@@ -20,27 +21,32 @@ function Profile() {
   const [loading, setLoading] = useState(true);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
 
+  // SUPABASE DATA FETCHING
   useEffect(() => {
-    if (!currentUser || !companyId) { 
-      setLoading(false); 
-      return; 
-    }
+    const fetchEmployeeProfile = async () => {
+      if (!currentUser || !companyId) {
+        setLoading(false);
+        return;
+      }
 
-    setLoading(true);
-    const employeesRef = collection(db, 'companies', companyId, 'employees');
-    const q = query(employeesRef, where("email", "==", currentUser.email));
+      setLoading(true);
+      // Fetch the employee record linked to the current user's ID
+      const { data, error } = await supabase
+        .from('employees')
+        .select('*')
+        .eq('user_id', currentUser.id)
+        .single();
 
-    const unsubscribe = onSnapshot(q, (querySnapshot) => {
-      if (!querySnapshot.empty) {
-        const doc = querySnapshot.docs[0];
-        setEmployee({ id: doc.id, ...doc.data() });
-      } else {
+      if (error) {
+        console.error('Error fetching employee profile:', error);
         setEmployee(null);
+      } else {
+        setEmployee(data);
       }
       setLoading(false);
-    });
+    };
 
-    return () => unsubscribe();
+    fetchEmployeeProfile();
   }, [currentUser, companyId]);
 
   if (loading) return <div className="p-8">Loading Your Profile...</div>;
@@ -86,8 +92,8 @@ function Profile() {
                       <InfoSection title="Employment Details" onEdit={() => setIsEditModalOpen(true)}>
                         <InfoField icon={<Briefcase size={16} />} label="Position" value={employee.position} />
                         <InfoField icon={<Users size={16} />} label="Department" value={employee.department} />
-                        <InfoField icon={<Briefcase size={16} />} label="Employment Type" value={employee.employmentType} />
-                        <InfoField icon={<Users size={16} />} label="Reports To" value={employee.managerEmail} />
+                        <InfoField icon={<Briefcase size={16} />} label="Employment Type" value={employee.employment_type} />
+                        <InfoField icon={<Users size={16} />} label="Reports To" value={employee.manager_email} />
                       </InfoSection>
                       <InfoSection title="Compensation" onEdit={() => setIsEditModalOpen(true)}>
                         <InfoField icon={<DollarSign size={16} />} label="Pay Rate" value={employee.compensation} />
@@ -101,18 +107,18 @@ function Profile() {
                         <InfoField icon={<Home size={16} />} label="Address" value={employee.address} />
                       </InfoSection>
                       <InfoSection title="Emergency Contact" onEdit={() => setIsEditModalOpen(true)}>
-                        <InfoField icon={<User size={16} />} label="Contact Name" value={employee.emergencyContactName} />
-                        <InfoField icon={<Shield size={16} />} label="Relationship" value={employee.emergencyContactRelationship} />
-                        <InfoField icon={<Phone size={16} />} label="Contact Phone" value={employee.emergencyContactPhone} />
+                        <InfoField icon={<User size={16} />} label="Contact Name" value={employee.emergency_contact_name} />
+                        <InfoField icon={<Shield size={16} />} label="Relationship" value={employee.emergency_contact_relationship} />
+                        <InfoField icon={<Phone size={16} />} label="Contact Phone" value={employee.emergency_contact_phone} />
                       </InfoSection>
                     </div>
                   )}
                   {activeTab === 'Time Off' && (
                     <div className="space-y-6">
                       <InfoSection title="Time Off Balances" onEdit={() => setIsEditModalOpen(true)}>
-                        <InfoField icon={<Plane size={16} />} label="Vacation" value={`${employee.vacationBalance} days`} />
-                        <InfoField icon={<Heart size={16} />} label="Sick Days" value={`${employee.sickBalance} days`} />
-                        <InfoField icon={<Sun size={16} />} label="Personal Days" value={`${employee.personalBalance} days`} />
+                        <InfoField icon={<Plane size={16} />} label="Vacation" value={`${employee.vacation_balance} days`} />
+                        <InfoField icon={<Heart size={16} />} label="Sick Days" value={`${employee.sick_balance} days`} />
+                        <InfoField icon={<Sun size={16} />} label="Personal Days" value={`${employee.personal_balance} days`} />
                       </InfoSection>
                     </div>
                   )}

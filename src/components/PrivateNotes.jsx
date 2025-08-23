@@ -1,6 +1,7 @@
+// src/components/PrivateNotes.jsx
+
 import React, { useState, useEffect } from 'react';
-import { db } from '../firebase';
-import { collection, onSnapshot, addDoc, serverTimestamp, orderBy, query } from 'firebase/firestore';
+import { supabase } from '../supabaseClient'; // UPDATED: Import Supabase
 import { MessageSquare } from 'lucide-react';
 import { useAppContext } from '../contexts/AppContext';
 
@@ -10,29 +11,52 @@ function PrivateNotes({ employeeId }) {
   const [newNote, setNewNote] = useState('');
   const [loading, setLoading] = useState(true);
 
+  // SUPABASE: Fetch notes
   useEffect(() => {
     if (!employeeId || !companyId) return;
-    const notesColRef = collection(db, "companies", companyId, "employees", employeeId, "privateNotes");
-    const q = query(notesColRef, orderBy('timestamp', 'desc'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setNotes(snapshot.docs.map(doc => ({ 
-          id: doc.id, 
-          ...doc.data(),
-          timestamp: doc.data().timestamp?.toDate() 
-      })));
-      setLoading(false);
-    });
-    return () => unsubscribe();
+    
+    const fetchNotes = async () => {
+        const { data, error } = await supabase
+            .from('private_notes')
+            .select('*')
+            .eq('employee_id', employeeId)
+            .order('timestamp', { ascending: false });
+
+        if (error) {
+            console.error("Error fetching notes:", error);
+        } else {
+            setNotes(data.map(note => ({
+                ...note,
+                timestamp: new Date(note.timestamp)
+            })));
+        }
+        setLoading(false);
+    };
+    
+    fetchNotes();
+
+    // Optional Realtime Subscription
+    const subscription = supabase
+        .channel(`private_notes:${employeeId}`)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'private_notes', filter: `employee_id=eq.${employeeId}` },
+            () => fetchNotes()
+        )
+        .subscribe();
+
+    return () => {
+        supabase.removeChannel(subscription);
+    };
   }, [employeeId, companyId]);
 
+  // SUPABASE: Add new note
   const handleAddNote = async (e) => {
     e.preventDefault();
     if (!newNote.trim() || !companyId) return;
-    const notesColRef = collection(db, "companies", companyId, "employees", employeeId, "privateNotes");
-    await addDoc(notesColRef, {
-      text: newNote,
-      timestamp: serverTimestamp()
-    });
+
+    await supabase
+      .from('private_notes')
+      .insert({ text: newNote, employee_id: employeeId, company_id: companyId });
+
     setNewNote('');
   };
 
@@ -41,7 +65,6 @@ function PrivateNotes({ employeeId }) {
       <h3 className="text-lg font-bold text-gray-800 mb-4">Private Manager Notes</h3>
       <p className="text-sm text-gray-500 mb-4">These notes are only visible to managers and administrators. They are not visible to the employee.</p>
       
-      {/* Add Note Form */}
       <form onSubmit={handleAddNote} className="mb-6">
         <textarea
           value={newNote}
@@ -57,7 +80,6 @@ function PrivateNotes({ employeeId }) {
         </div>
       </form>
 
-      {/* Note List */}
       <div className="space-y-4">
         {notes.map(note => (
           <div key={note.id} className="flex items-start">

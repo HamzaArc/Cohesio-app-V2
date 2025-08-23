@@ -1,6 +1,7 @@
+// src/components/OnboardingPlan.jsx
+
 import React, { useState, useEffect } from 'react';
-import { db } from '../firebase';
-import { collection, onSnapshot, doc, updateDoc, addDoc, deleteDoc } from 'firebase/firestore';
+import { supabase } from '../supabaseClient'; // UPDATED: Import Supabase
 import { Plus, Trash2 } from 'lucide-react';
 import { useAppContext } from '../contexts/AppContext';
 
@@ -10,32 +11,64 @@ function OnboardingPlan({ employeeId }) {
   const [newTask, setNewTask] = useState('');
   const [loading, setLoading] = useState(true);
 
+  // SUPABASE: Fetch tasks
   useEffect(() => {
     if (!employeeId || !companyId) return;
-    const tasksColRef = collection(db, "companies", companyId, "employees", employeeId, "onboardingTasks");
-    const unsubscribe = onSnapshot(tasksColRef, (snapshot) => {
-      setTasks(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-      setLoading(false);
-    });
-    return () => unsubscribe();
+    
+    const fetchTasks = async () => {
+        const { data, error } = await supabase
+            .from('onboarding_tasks')
+            .select('*')
+            .eq('employee_id', employeeId);
+        
+        if (error) {
+            console.error("Error fetching onboarding tasks:", error);
+        } else {
+            setTasks(data);
+        }
+        setLoading(false);
+    };
+
+    fetchTasks();
+    
+    // SETUP REALTIME SUBSCRIPTION (Optional, but good for immediate UI updates)
+    const subscription = supabase
+        .channel(`onboarding_tasks:${employeeId}`)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'onboarding_tasks', filter: `employee_id=eq.${employeeId}` },
+            () => fetchTasks() // Refetch on any change
+        )
+        .subscribe();
+
+    return () => {
+        supabase.removeChannel(subscription);
+    };
+
   }, [employeeId, companyId]);
 
+  // SUPABASE: Update task
   const handleToggleTask = async (taskId, currentStatus) => {
-    const taskRef = doc(db, "companies", companyId, "employees", employeeId, "onboardingTasks", taskId);
-    await updateDoc(taskRef, { completed: !currentStatus });
+    await supabase
+      .from('onboarding_tasks')
+      .update({ completed: !currentStatus })
+      .eq('id', taskId);
   };
 
+  // SUPABASE: Add task
   const handleAddTask = async (e) => {
     e.preventDefault();
-    if (!newTask.trim()) return;
-    const tasksColRef = collection(db, "companies", companyId, "employees", employeeId, "onboardingTasks");
-    await addDoc(tasksColRef, { text: newTask, completed: false });
+    if (!newTask.trim() || !companyId) return;
+    await supabase
+      .from('onboarding_tasks')
+      .insert({ text: newTask, completed: false, employee_id: employeeId, company_id: companyId });
     setNewTask('');
   };
 
+  // SUPABASE: Delete task
   const handleDeleteTask = async (taskId) => {
-    const taskRef = doc(db, "companies", companyId, "employees", employeeId, "onboardingTasks", taskId);
-    await deleteDoc(taskRef);
+    await supabase
+      .from('onboarding_tasks')
+      .delete()
+      .eq('id', taskId);
   };
   
   const completionPercentage = tasks.length > 0 ? (tasks.filter(t => t.completed).length / tasks.length) * 100 : 0;
@@ -46,7 +79,6 @@ function OnboardingPlan({ employeeId }) {
     <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
         <h3 className="text-lg font-bold text-gray-800 mb-4">Onboarding Progress</h3>
         
-        {/* Progress Bar */}
         <div className="mb-4">
             <div className="flex justify-between mb-1">
                 <span className="text-sm font-medium text-gray-700">Completion</span>
@@ -57,7 +89,6 @@ function OnboardingPlan({ employeeId }) {
             </div>
         </div>
 
-        {/* Task List */}
         <div className="space-y-3">
             {tasks.map(task => (
                 <div key={task.id} className="flex items-center justify-between p-2 rounded-md hover:bg-gray-50">
@@ -79,7 +110,6 @@ function OnboardingPlan({ employeeId }) {
             ))}
         </div>
 
-        {/* Add Task Form */}
         <form onSubmit={handleAddTask} className="mt-4 pt-4 border-t">
             <div className="flex gap-2">
                 <input

@@ -1,7 +1,8 @@
+// src/components/OrgChart.jsx
+
 import React from 'react';
 import { Link } from 'react-router-dom';
 
-// A reusable component for each employee card in the chart
 const EmployeeCard = ({ employee }) => (
   <div className="flex flex-col items-center p-4 bg-white rounded-lg shadow-sm border border-gray-200 min-w-[160px]">
     <img
@@ -14,7 +15,6 @@ const EmployeeCard = ({ employee }) => (
   </div>
 );
 
-// A recursive component to render a manager and their direct reports
 const TreeNode = ({ node }) => {
     return (
         <div className="flex flex-col items-center">
@@ -38,25 +38,20 @@ const TreeNode = ({ node }) => {
 };
 
 function OrgChart({ employees }) {
-  // --- NEW: A much more robust, two-pass algorithm for building the tree ---
   const buildTree = () => {
     const nodes = {};
-    // First pass: create a node for each employee and index it by its own ID.
     employees.forEach(emp => {
       nodes[emp.id] = { ...emp, children: [] };
     });
 
     const tree = [];
-    // Second pass: iterate through all created nodes to link them.
     Object.values(nodes).forEach(node => {
-      // Find the manager for the current node.
-      const manager = employees.find(m => m.email === node.managerEmail);
+      // UPDATED: managerEmail changed to manager_email
+      const manager = employees.find(m => m.email === node.manager_email);
       
       if (manager && manager.id !== node.id && nodes[manager.id]) {
-        // If a manager exists in our map, add the current node as a child.
         nodes[manager.id].children.push(node);
       } else {
-        // If no manager is found, this is a top-level employee (a "root").
         tree.push(node);
       }
     });

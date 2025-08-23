@@ -1,6 +1,7 @@
+// src/components/AddJourneyEventModal.jsx
+
 import React, { useState } from 'react';
-import { db } from '../firebase';
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { supabase } from '../supabaseClient'; // UPDATED: Import Supabase
 import { X } from 'lucide-react';
 import { useAppContext } from '../contexts/AppContext';
 
@@ -12,6 +13,7 @@ function AddJourneyEventModal({ isOpen, onClose, onEventAdded, employeeId }) {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
+  // SUPABASE: Add journey event
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!eventType || !effectiveDate || !details || !companyId) {
@@ -22,14 +24,14 @@ function AddJourneyEventModal({ isOpen, onClose, onEventAdded, employeeId }) {
     setError('');
 
     try {
-      // We create the event inside a subcollection of the employee
-      const journeyCollectionRef = collection(db, 'companies', companyId, 'employees', employeeId, 'journey');
-      await addDoc(journeyCollectionRef, {
+      await supabase.from('employee_journey').insert({
+        employee_id: employeeId,
+        company_id: companyId,
         type: eventType,
         date: effectiveDate,
         details,
-        createdAt: serverTimestamp(),
       });
+
       onEventAdded();
       handleClose();
     } catch (err) {
@@ -81,7 +83,7 @@ function AddJourneyEventModal({ isOpen, onClose, onEventAdded, employeeId }) {
           {error && <p className="text-red-500 text-sm mt-4">{error}</p>}
           <div className="mt-8 flex justify-end">
             <button type="button" onClick={handleClose} className="bg-gray-200 text-gray-800 font-bold py-2 px-4 rounded-lg mr-2 hover:bg-gray-300">Cancel</button>
-            <button type="submit" disabled={loading} className="bg-[#4A1D4A] text-white font-bold py-2 px-4 rounded-lg hover:bg-[#6E2A6E] disabled:bg-gray-400">
+            <button type="submit" disabled={loading} className="bg-blue-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-blue-700 disabled:bg-gray-400">
               {loading ? 'Saving...' : 'Save Event'}
             </button>
           </div>
