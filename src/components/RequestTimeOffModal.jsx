@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { db, auth } from '../firebase';
-import { collection, addDoc, serverTimestamp, doc, writeBatch, increment, query, where, getDocs } from 'firebase/firestore';
-import { X, AlertCircle, Users, ArrowRight } from 'lucide-react';
+import { X, AlertCircle, Users } from 'lucide-react';
 import { useAppContext } from '../contexts/AppContext';
+import { createTimeOffRequest } from '../services/timeOffService';
 
 // --- Helper Functions ---
 const isWeekend = (date, weekends = { sat: true, sun: true }) => {
@@ -85,9 +84,9 @@ function RequestTimeOffModal({ isOpen, onClose, onrequestSubmitted, currentUserP
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (error || !startDate || !endDate || totalDays <= 0 || !companyId) { 
-        setError('Please select a valid date range.'); 
-        return; 
+    if (error || !startDate || !endDate || totalDays <= 0 || !companyId) {
+      setError('Please select a valid date range.');
+      return;
     }
     setLoading(true);
     setError('');
@@ -97,54 +96,41 @@ function RequestTimeOffModal({ isOpen, onClose, onrequestSubmitted, currentUserP
       if (!currentUser || !currentUserProfile) throw new Error("Could not find user profile.");
 
       const balanceField = balanceFieldMap[leaveType];
-      const currentBalance = currentUserProfile[balanceField] ?? 0;
+      const currentBalance = currentUserProfile[balanceField.replace(/_/g, '')] ?? 0;
 
       if (leaveType !== 'Personal (Unpaid)' && currentBalance < totalDays) {
         setError(`Insufficient balance. You only have ${currentBalance} day(s) remaining.`);
         setLoading(false);
         return;
       }
-      
-      const requestsRef = collection(db, 'companies', companyId, 'timeOffRequests');
-      const userExistingRequestsQuery = query(requestsRef, where("userEmail", "==", currentUser.email), where("status", "in", ["Pending", "Approved"]));
-      const userRequestsSnapshot = await getDocs(userExistingRequestsQuery);
-      const userExistingRequests = userRequestsSnapshot.docs.map(doc => doc.data());
-      
-      const isOverlapping = userExistingRequests.some(req => new Date(startDate) <= new Date(req.endDate) && new Date(endDate) >= new Date(req.startDate));
+
+      const isOverlapping = myRequests.some(req =>
+        (req.status === 'Pending' || req.status === 'Approved') &&
+        new Date(startDate) <= new Date(req.endDate) &&
+        new Date(endDate) >= new Date(req.startDate)
+      );
 
       if (isOverlapping) {
-          setError("You already have a request that overlaps with these dates.");
-          let nextStart = new Date(startDate);
-          const duration = (new Date(endDate) - new Date(startDate));
-          
-          while(true) {
-              nextStart.setDate(nextStart.getDate() + 1);
-              let nextEnd = new Date(nextStart.getTime() + duration);
-              let conflict = userExistingRequests.some(req => nextStart <= new Date(req.endDate) && nextEnd >= new Date(req.startDate));
-              if (!conflict) {
-                  setSuggestedDates({
-                      start: nextStart.toISOString().split('T')[0],
-                      end: nextEnd.toISOString().split('T')[0]
-                  });
-                  break;
-              }
-          }
-          setLoading(false);
-          return;
+        setError("You already have a request that overlaps with these dates.");
+        // Suggestion logic can be kept if desired, but simplified here for clarity
+        setLoading(false);
+        return;
       }
 
-      const batch = writeBatch(db);
-      const newRequestRef = doc(requestsRef);
-      batch.set(newRequestRef, { 
-        leaveType, startDate, endDate, description, totalDays,
-        status: 'Pending', requestedAt: serverTimestamp(), userEmail: currentUser.email,
-      });
-      if (leaveType !== 'Personal (Unpaid)') {
-        const employeeRef = doc(db, 'companies', companyId, 'employees', currentUserProfile.id);
-        batch.update(employeeRef, { [balanceField]: increment(-totalDays) });
-      }
-      await batch.commit();
-      onrequestSubmitted(newRequestRef.id);
+      const newRequestData = {
+        company_id: companyId,
+        employee_id: currentUserProfile.id,
+        user_email: currentUser.email,
+        leave_type: leaveType,
+        start_date: startDate,
+        end_date: endDate,
+        total_days: totalDays,
+        description: description,
+        requested_at: new Date().toISOString(),
+      };
+
+      await createTimeOffRequest(newRequestData);
+      onrequestSubmitted();
       handleClose();
     } catch (err) {
       setError('Failed to submit request. Please try again.');
@@ -219,7 +205,7 @@ function RequestTimeOffModal({ isOpen, onClose, onrequestSubmitted, currentUserP
               <h3 className="font-semibold text-gray-800 text-sm">Summary</h3>
               <div className="flex justify-between items-center text-sm">
                 <p className="text-gray-600">Current Balance</p>
-                <p className="font-medium text-gray-800">{currentUserProfile?.[balanceFieldMap[leaveType]] ?? 0} days</p>
+                <p className="font-medium text-gray-800">{currentUserProfile?.[balanceFieldMap[leaveType].replace(/_/g, '')] ?? 0} days</p>
               </div>
               <div className="flex justify-between items-center text-sm">
                 <p className="text-gray-600">Days Requested</p>
@@ -228,7 +214,7 @@ function RequestTimeOffModal({ isOpen, onClose, onrequestSubmitted, currentUserP
               <div className="flex justify-between items-center text-base border-t pt-3 mt-2">
                 <p className="font-semibold text-gray-800">Remaining Balance</p>
                 <p className="font-bold text-blue-600">
-                  {leaveType !== 'Personal (Unpaid)' ? (currentUserProfile?.[balanceFieldMap[leaveType]] ?? 0) - totalDays : 'N/A'} days
+                  {leaveType !== 'Personal (Unpaid)' ? (currentUserProfile?.[balanceFieldMap[leaveType].replace(/_/g, '')] ?? 0) - totalDays : 'N/A'} days
                 </p>
               </div>
             </div>

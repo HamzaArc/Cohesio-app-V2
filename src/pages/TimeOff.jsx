@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Plus, Plane, Heart, Sun, Trash2, Calendar, List, Filter, Settings, UserCheck, Check, XIcon, Eye } from 'lucide-react';
-import { db, auth } from '../firebase';
-import { collection, onSnapshot, orderBy, query, doc, updateDoc, deleteDoc, where, writeBatch, increment, addDoc, serverTimestamp } from 'firebase/firestore';
+import { Plus, Plane, Heart, Sun, Filter, Settings, UserCheck, Check, XIcon, Eye } from 'lucide-react';
 import { useAppContext } from '../contexts/AppContext';
+import { subscribeToTimeOffData, updateRequestStatus, deleteTimeOffRequest } from '../services/timeOffService';
 import RequestTimeOffModal from '../components/RequestTimeOffModal';
 import TeamCalendar from '../components/TeamCalendar';
 import DeleteConfirmationModal from '../components/DeleteConfirmationModal';
@@ -15,7 +14,7 @@ const BalanceCard = ({ icon, title, balance, bgColor, iconColor }) => ( <div cla
 const MainTab = ({ label, active, onClick }) => ( <button onClick={onClick} className={`py-3 px-4 text-sm font-semibold transition-colors ${ active ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500 hover:text-gray-700' }`}>{label}</button> );
 
 function TimeOff() {
-  const { employees, loading: employeesLoading, companyId, currentUser } = useAppContext();
+  const { employees, loading: employeesLoading, companyId, currentUser, refetchEmployees } = useAppContext();
   const [allRequests, setAllRequests] = useState([]);
   const [requestsLoading, setRequestsLoading] = useState(true);
   const [currentUserProfile, setCurrentUserProfile] = useState(null);
@@ -37,21 +36,23 @@ function TimeOff() {
   const [selectedLeaveType, setSelectedLeaveType] = useState('All');
 
   useEffect(() => {
-    if (!currentUser || !companyId) { 
-        setRequestsLoading(false); 
-        return; 
+    if (!currentUser || !companyId) {
+      setRequestsLoading(false);
+      return;
     }
-    const policyRef = doc(db, 'companies', companyId, 'policies', 'timeOff');
-    const holidaysColRef = collection(policyRef, 'holidays');
-    const unsubPolicy = onSnapshot(policyRef, (docSnap) => { if (docSnap.exists()) setWeekends(docSnap.data().weekends || { sat: true, sun: true }); });
-    const unsubHolidays = onSnapshot(holidaysColRef, (snapshot) => { setHolidays(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))); });
-    
-    const requestsQuery = query(collection(db, 'companies', companyId, 'timeOffRequests'), orderBy('requestedAt', 'desc'));
-    const unsubRequests = onSnapshot(requestsQuery, (reqSnapshot) => {
-      setAllRequests(reqSnapshot.docs.map(doc => ({ ...doc.data(), id: doc.id })));
+    setRequestsLoading(true);
+    const subscription = subscribeToTimeOffData(companyId, ({ requests, policy, holidays }) => {
+      setAllRequests(requests || []);
+      setWeekends(policy?.weekends || { sat: true, sun: true });
+      setHolidays(holidays || []);
       setRequestsLoading(false);
     });
-    return () => { unsubPolicy(); unsubHolidays(); unsubRequests(); };
+
+    return () => {
+      if (subscription && typeof subscription.unsubscribe === 'function') {
+        subscription.unsubscribe();
+      }
+    };
   }, [currentUser, companyId]);
 
   useEffect(() => {
@@ -69,8 +70,14 @@ function TimeOff() {
     const employeeMap = new Map(employees.map(e => [e.email, { name: e.name, department: e.department }]));
     return allRequests.map(req => ({
       ...req,
-      employeeName: employeeMap.get(req.userEmail)?.name || 'Unknown',
-      department: employeeMap.get(req.userEmail)?.department || 'N/A'
+      employeeName: employeeMap.get(req.user_email)?.name || 'Unknown',
+      department: employeeMap.get(req.user_email)?.department || 'N/A',
+      // Ensure field names from DB are mapped to component props
+      leaveType: req.leave_type,
+      startDate: req.start_date,
+      endDate: req.end_date,
+      totalDays: req.total_days,
+      userEmail: req.user_email,
     }));
   }, [allRequests, employees]);
 
@@ -106,49 +113,35 @@ function TimeOff() {
     });
   }, [requestsWithNameAndDept, selectedDepartments, selectedLeaveType, scope, currentUser, myTeam]);
 
-  const addHistoryLog = async (requestId, action) => { 
-      if (!companyId) return;
-      await addDoc(collection(db, 'companies', companyId, 'timeOffRequests', requestId, 'history'), { action, timestamp: serverTimestamp() }); 
-    };
-  const handleRequestSubmitted = (newRequestId) => { setIsAddModalOpen(false); addHistoryLog(newRequestId, 'Created'); };
+  const handleRequestSubmitted = () => {
+    setIsAddModalOpen(false);
+    refetchEmployees(); // Refetch employee data to get updated balances
+  };
 
   const handleUpdateRequestStatus = async (request, newStatus) => {
-    if (!companyId) return;
-    const employee = employees.find(e => e.email === request.userEmail);
-    if (!employee) { console.error("Could not find employee to update balance."); return; }
-
-    const requestRef = doc(db, 'companies', companyId, 'timeOffRequests', request.id);
-    const employeeRef = doc(db, 'companies', companyId, 'employees', employee.id);
-    
-    const balanceFieldMap = { 'Vacation': 'vacationBalance', 'Sick Day': 'sickBalance', 'Personal (Unpaid)': 'personalBalance' };
-    const balanceField = balanceFieldMap[request.leaveType];
-    const days = request.totalDays;
-    const batch = writeBatch(db);
-
-    batch.update(requestRef, { status: newStatus });
-    if (newStatus === 'Denied' && request.status === 'Pending') { batch.update(employeeRef, { [balanceField]: increment(days) }); }
-    
-    await batch.commit();
-    await addHistoryLog(request.id, newStatus);
+    try {
+      await updateRequestStatus(request.id, newStatus, request);
+      refetchEmployees(); // Refetch to show updated balances
+    } catch (error) {
+      console.error("Failed to update request status:", error);
+      // Optionally show an error to the user
+    }
   };
 
   const handleDeleteClick = (request) => { setSelectedRequest(request); setIsDeleteModalOpen(true); };
   const handleDeleteConfirm = async () => {
-    if (!selectedRequest || !companyId) return;
+    if (!selectedRequest) return;
     setIsDeleting(true);
-    const employee = employees.find(e => e.email === selectedRequest.userEmail);
-    const requestRef = doc(db, 'companies', companyId, 'timeOffRequests', selectedRequest.id);
-    const batch = writeBatch(db);
-    batch.delete(requestRef);
-    if (employee && selectedRequest.status === 'Pending') {
-        const balanceFieldMap = { 'Vacation': 'vacationBalance', 'Sick Day': 'sickBalance', 'Personal (Unpaid)': 'personalBalance' };
-        const balanceField = balanceFieldMap[selectedRequest.leaveType];
-        const days = selectedRequest.totalDays;
-        const employeeRef = doc(db, 'companies', companyId, 'employees', employee.id);
-        batch.update(employeeRef, { [balanceField]: increment(days) });
+    try {
+      await deleteTimeOffRequest(selectedRequest);
+      refetchEmployees(); // Refetch to show updated balances
+    } catch (error) {
+      console.error("Failed to delete request:", error);
+    } finally {
+      setIsDeleting(false);
+      setIsDeleteModalOpen(false);
+      setSelectedRequest(null);
     }
-    await batch.commit();
-    setIsDeleteModalOpen(false); setSelectedRequest(null); setIsDeleting(false);
   };
 
   const handleWithdrawRequest = (request) => { setIsDetailsModalOpen(false); handleDeleteClick(request); };

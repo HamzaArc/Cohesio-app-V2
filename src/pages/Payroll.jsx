@@ -1,9 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Plus, Eye, Calendar as CalendarIcon, CheckCircle, Clock } from 'lucide-react';
-import { db } from '../firebase';
-import { collection, onSnapshot, query, orderBy, addDoc, serverTimestamp, getDocs, where } from 'firebase/firestore';
+import { Eye, Calendar as CalendarIcon, CheckCircle, Clock } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAppContext } from '../contexts/AppContext';
+import { subscribeToPayrollRuns, startPayrollRun } from '../services/payrollService';
 import PayrollSettings from '../components/PayrollSettings';
 import RunSpecificMonthModal from '../components/RunSpecificMonthModal';
 
@@ -24,13 +23,23 @@ function Payroll() {
       return;
     }
     setLoading(true);
-    const payrollRunsQuery = query(collection(db, 'companies', companyId, 'payrollRuns'), orderBy('period', 'desc'));
-    const unsubscribe = onSnapshot(payrollRunsQuery, (snap) => {
-        const runs = snap.docs.map(doc => ({ id: doc.id, ...doc.data(), runAt: doc.data().finalizedAt?.toDate().toLocaleDateString() }));
-        setPayrollRuns(runs);
-        setLoading(false);
+
+    const subscription = subscribeToPayrollRuns(companyId, (runs) => {
+      const formattedRuns = runs.map(run => ({
+        ...run,
+        periodLabel: run.period_label,
+        totalNetPay: run.total_net_pay,
+        runAt: run.finalized_at ? new Date(run.finalized_at).toLocaleDateString() : null
+      }));
+      setPayrollRuns(formattedRuns);
+      setLoading(false);
     });
-    return () => unsubscribe();
+
+    return () => {
+      if (subscription && typeof subscription.unsubscribe === 'function') {
+        subscription.unsubscribe();
+      }
+    };
   }, [companyId]);
 
   const nextPayrollPeriod = useMemo(() => {
@@ -55,28 +64,16 @@ function Payroll() {
   const handleStartPayroll = async (month, year) => {
     if (!companyId) return;
     setIsCreating(true);
-    const periodId = `${year}-${month}`;
-    const periodLabel = `${new Date(year, month - 1).toLocaleString('default', { month: 'long' })} ${year}`;
-    
-    const payrollRunsRef = collection(db, "companies", companyId, "payrollRuns");
-    const q = query(payrollRunsRef, where("period", "==", periodId));
-    const existingRun = await getDocs(q);
-    
-    if (!existingRun.empty) {
-        navigate(`/payroll/run/${existingRun.docs[0].id}`);
-    } else {
-        const newRun = {
-            period: periodId,
-            periodLabel: periodLabel,
-            status: 'Draft',
-            createdAt: serverTimestamp(),
-            employeeData: {}
-        };
-        const docRef = await addDoc(payrollRunsRef, newRun);
-        navigate(`/payroll/run/${docRef.id}`);
+    try {
+      const { id: runId } = await startPayrollRun(companyId, month, year);
+      navigate(`/payroll/run/${runId}`);
+    } catch (error) {
+      console.error("Failed to start payroll:", error);
+      // Optionally, show an error message to the user
+    } finally {
+      setIsCreating(false);
+      setIsSpecificMonthModalOpen(false);
     }
-    setIsCreating(false);
-    setIsSpecificMonthModalOpen(false);
   };
 
   const handleActionClick = (run) => {

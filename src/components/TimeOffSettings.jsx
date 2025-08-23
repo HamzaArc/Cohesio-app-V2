@@ -1,10 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { db } from '../firebase';
-import { doc, getDoc, setDoc, collection, onSnapshot, addDoc, deleteDoc, writeBatch, getDocs } from 'firebase/firestore';
-import { Plus, Trash2, BrainCircuit, Save, Zap, AlertCircle } from 'lucide-react';
+import { Plus, Trash2, Save, Zap } from 'lucide-react';
 import { useAppContext } from '../contexts/AppContext';
-
-const countries = ["Canada", "USA", "UK", "Germany", "France", "Australia"];
+import { supabase } from '../supabaseClient'; // Direct import for subscription
+import {
+  updateWeekendSettings,
+  addHoliday,
+  deleteHoliday,
+  saveResetPolicy,
+  runManualBalanceReset
+} from '../services/timeOffService';
 
 function TimeOffSettings() {
   const { companyId } = useAppContext();
@@ -24,131 +28,77 @@ function TimeOffSettings() {
 
   const [newHolidayName, setNewHolidayName] = useState('');
   const [newHolidayDate, setNewHolidayDate] = useState('');
-  const [selectedCountry, setSelectedCountry] = useState('Canada');
-  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear() + 1);
   const [loading, setLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
-  const [aiLoading, setAiLoading] = useState(false);
 
   useEffect(() => {
     if (!companyId) {
-        setLoading(false);
-        return;
-    }
-    const policyRef = doc(db, 'companies', companyId, 'policies', 'timeOff');
-    const holidaysColRef = collection(policyRef, 'holidays');
-
-    const unsubscribePolicy = onSnapshot(policyRef, (docSnap) => {
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        setWeekends(data.weekends || { sat: true, sun: true });
-        if (data.resetPolicy) {
-            setResetPolicy(prev => ({ ...prev, ...data.resetPolicy }));
-        }
-      }
-    });
-
-    const unsubscribeHolidays = onSnapshot(holidaysColRef, (snapshot) => {
-      setHolidays(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
       setLoading(false);
-    });
+      return;
+    }
 
-    return () => { unsubscribePolicy(); unsubscribeHolidays(); };
+    const fetchInitialData = async () => {
+      const { data: policyData, error: policyError } = await supabase
+        .from('time_off_policies')
+        .select('*')
+        .eq('company_id', companyId)
+        .single();
+
+      if (policyData) {
+        setWeekends(policyData.weekends || { sat: true, sun: true });
+        if (policyData.reset_policy) {
+          setResetPolicy(prev => ({ ...prev, ...policyData.reset_policy }));
+        }
+      } else if (policyError && policyError.code !== 'PGRST116') {
+        console.error("Error fetching policy", policyError);
+      }
+
+      const { data: holidaysData, error: holidaysError } = await supabase
+        .from('holidays')
+        .select('*')
+        .eq('company_id', companyId);
+
+      if (holidaysData) {
+        setHolidays(holidaysData);
+      } else {
+        console.error("Error fetching holidays", holidaysError);
+      }
+      setLoading(false);
+    };
+
+    fetchInitialData();
+
+    const channel = supabase.channel(`time-off-settings:${companyId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'holidays', filter: `company_id=eq.${companyId}` }, fetchInitialData)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'time_off_policies', filter: `company_id=eq.${companyId}` }, fetchInitialData)
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [companyId]);
 
   const handleWeekendChange = async (day) => {
     if (!companyId) return;
     const newWeekends = { ...weekends, [day]: !weekends[day] };
     setWeekends(newWeekends);
-    await setDoc(doc(db, 'companies', companyId, 'policies', 'timeOff'), { weekends: newWeekends }, { merge: true });
+    await updateWeekendSettings(companyId, newWeekends);
   };
 
   const handleAddHoliday = async (e) => {
     e.preventDefault();
     if (!newHolidayName || !newHolidayDate || !companyId) return;
-    const policyRef = doc(db, 'companies', companyId, 'policies', 'timeOff');
-    await addDoc(collection(policyRef, 'holidays'), { name: newHolidayName, date: newHolidayDate });
+    await addHoliday(companyId, { name: newHolidayName, date: newHolidayDate });
     setNewHolidayName('');
     setNewHolidayDate('');
   };
 
   const handleDeleteHoliday = async (holidayId) => {
     if (!companyId) return;
-    await deleteDoc(doc(db, 'companies', companyId, 'policies', 'timeOff', 'holidays', holidayId));
+    await deleteHoliday(holidayId);
   };
-
-  const handleFetchHolidays = async () => {
-    if (!companyId) return;
-    setAiLoading(true);
-    const prompt = `List all official public holidays for ${selectedCountry} for the year ${selectedYear}.`;
-
-    try {
-        let chatHistory = [];
-        chatHistory.push({ role: "user", parts: [{ text: prompt }] });
-
-        const payload = {
-            contents: chatHistory,
-            generationConfig: {
-                responseMimeType: "application/json",
-                responseSchema: {
-                    type: "ARRAY",
-                    items: {
-                        type: "OBJECT",
-                        properties: {
-                            "holidayName": { "type": "STRING" },
-                            "holidayDate": { "type": "STRING", "description": "Date in YYYY-MM-DD format" }
-                        },
-                        required: ["holidayName", "holidayDate"]
-                    }
-                }
-            }
-        };
-        
-        // NOTE: This API key is a placeholder and will not work.
-        // Replace "YOUR_GEMINI_API_KEY" with a valid key to enable this feature.
-        const apiKey = "YOUR_GEMINI_API_KEY";
-        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
-
-        const response = await fetch(apiUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        });
-
-        if (!response.ok) {
-            const errorBody = await response.json().catch(() => null);
-            const errorMessage = errorBody?.error?.message || `API request failed with status ${response.status}`;
-            throw new Error(errorMessage);
-        }
-
-        const result = await response.json();
-        const text = result?.candidates?.[0]?.content?.parts?.[0]?.text;
-
-        if (text) {
-            const fetchedHolidays = JSON.parse(text);
-            const batch = writeBatch(db);
-            const policyRef = doc(db, 'companies', companyId, 'policies', 'timeOff');
-
-            fetchedHolidays.forEach(holiday => {
-                const newHolidayRef = doc(collection(policyRef, 'holidays'));
-                batch.set(newHolidayRef, { name: holiday.holidayName, date: holiday.holidayDate });
-            });
-
-            await batch.commit();
-        } else {
-            throw new Error("Could not parse holidays from AI response.");
-        }
-
-    } catch (error) {
-        console.error("Error fetching holidays with AI:", error);
-        alert(`AI Assistant Error: I couldn't fetch the holidays.\n\nReason: ${error.message}\n\nPlease try again or add them manually.`);
-    } finally {
-        setAiLoading(false);
-    }
-  };
-
 
   const handlePolicyChange = (e) => {
     const { id, value, type, checked } = e.target;
@@ -160,8 +110,7 @@ function TimeOffSettings() {
     setIsSaving(true);
     setSaveSuccess(false);
     try {
-      const docRef = doc(db, 'companies', companyId, 'policies', 'timeOff');
-      await setDoc(docRef, { resetPolicy }, { merge: true });
+      await saveResetPolicy(companyId, resetPolicy);
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 2000);
     } catch (error) {
@@ -174,40 +123,17 @@ function TimeOffSettings() {
 
   const handleManualReset = async () => {
     if (!companyId) return;
-    const currentYear = new Date().getFullYear();
-    if (resetPolicy.lastResetYear === currentYear) {
-      alert(`Balances have already been reset for ${currentYear}. The reset can only be run once per year.`);
-      return;
-    }
-    if (!window.confirm(`Are you sure you want to manually reset all employee balances for ${currentYear}? This action cannot be undone.`)) {
+    if (!window.confirm(`Are you sure you want to manually reset all employee balances for ${new Date().getFullYear()}? This action cannot be undone.`)) {
       return;
     }
 
     setIsResetting(true);
     try {
-      const employeesSnapshot = await getDocs(collection(db, 'companies', companyId, 'employees'));
-      const batch = writeBatch(db);
-
-      employeesSnapshot.forEach(employeeDoc => {
-        const employeeRef = doc(db, 'companies', companyId, 'employees', employeeDoc.id);
-        const updateData = {};
-        if (resetPolicy.resetVacation) updateData.vacationBalance = Number(resetPolicy.vacationMax);
-        if (resetPolicy.resetSick) updateData.sickBalance = Number(resetPolicy.sickMax);
-        if (resetPolicy.resetPersonal) updateData.personalBalance = Number(resetPolicy.personalMax);
-
-        if (Object.keys(updateData).length > 0) {
-            batch.update(employeeRef, updateData);
-        }
-      });
-
-      const policyRef = doc(db, 'companies', companyId, 'policies', 'timeOff');
-      batch.set(policyRef, { resetPolicy: { ...resetPolicy, lastResetYear: currentYear } }, { merge: true });
-
-      await batch.commit();
-      alert(`Successfully reset balances for ${employeesSnapshot.size} employees.`);
+      const message = await runManualBalanceReset(companyId, resetPolicy);
+      alert(message);
     } catch (error) {
         console.error("Error resetting balances:", error);
-        alert("An error occurred while resetting balances.");
+        alert(`An error occurred while resetting balances: ${error.message}`);
     } finally {
         setIsResetting(false);
     }
