@@ -1,6 +1,7 @@
+// src/components/AddTrainingModal.jsx
+
 import React, { useState } from 'react';
-import { db } from '../firebase';
-import { collection, addDoc, serverTimestamp, writeBatch, doc } from 'firebase/firestore';
+import { supabase } from '../supabaseClient';
 import { X, User, Users, Plus, Trash2 } from 'lucide-react';
 import { useAppContext } from '../contexts/AppContext';
 
@@ -25,7 +26,7 @@ function AddTrainingModal({ isOpen, onClose, onProgramAdded }) {
   const handleRemoveStep = (id) => setSteps(steps.filter(step => step.id !== id));
 
   const handleEmployeeToggle = (email) => {
-    setAssignedEmails(prev => 
+    setAssignedEmails(prev =>
       prev.includes(email) ? prev.filter(e => e !== email) : [...prev, email]
     );
   };
@@ -40,23 +41,30 @@ function AddTrainingModal({ isOpen, onClose, onProgramAdded }) {
     setError('');
 
     try {
-      const batch = writeBatch(db);
-      const programRef = doc(collection(db, 'companies', companyId, 'training'));
+      const { data: programData, error: programError } = await supabase
+        .from('training_programs')
+        .insert({
+            title,
+            description,
+            category,
+            due_date: dueDate || null,
+            company_id: companyId,
+        })
+        .select()
+        .single();
       
-      batch.set(programRef, {
-        title,
-        description,
-        category,
-        assignmentType,
-        assignedEmails: assignmentType === 'specific' ? assignedEmails : [],
-        dueDate: dueDate || null,
-        created: serverTimestamp(),
-      });
+      if (programError) throw programError;
 
-      steps.forEach((step, index) => {
-        const stepRef = doc(collection(db, 'companies', companyId, 'training', programRef.id, 'steps'));
-        batch.set(stepRef, { text: step.text, order: index });
-      });
+      const stepsToInsert = steps.map((step, index) => ({
+        program_id: programData.id,
+        text: step.text,
+        order: index
+      }));
+
+      if (stepsToInsert.length > 0) {
+        const { error: stepsError } = await supabase.from('training_steps').insert(stepsToInsert);
+        if (stepsError) throw stepsError;
+      }
       
       let finalAssignedEmails = [];
       if (assignmentType === 'all') {
@@ -65,17 +73,22 @@ function AddTrainingModal({ isOpen, onClose, onProgramAdded }) {
         finalAssignedEmails = assignedEmails;
       }
 
-      finalAssignedEmails.forEach(email => {
-          const participantRef = doc(collection(db, 'companies', companyId, 'training', programRef.id, 'participants'));
-          batch.set(participantRef, {
-            userEmail: email,
+      const participantsToInsert = finalAssignedEmails.map(email => {
+          const employee = employees.find(e => e.email === email);
+          return {
+            program_id: programData.id,
+            employee_id: employee.id,
+            user_email: email,
             status: 'Assigned',
-            completionDate: null,
-            stepsStatus: steps.map(step => ({ stepId: step.id.toString(), status: 'Pending', notes: '', completedAt: null }))
-          });
+            steps_status: steps.map(step => ({ stepId: step.id.toString(), status: 'Pending', notes: '', completedAt: null }))
+          };
       });
       
-      await batch.commit();
+      if (participantsToInsert.length > 0) {
+        const { error: participantsError } = await supabase.from('training_participants').insert(participantsToInsert);
+        if (participantsError) throw participantsError;
+      }
+      
       onProgramAdded();
       handleClose();
     } catch (err) {

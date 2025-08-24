@@ -1,6 +1,7 @@
+// src/components/EditDocumentModal.jsx
+
 import React, { useState, useEffect } from 'react';
-import { db } from '../firebase';
-import { doc, updateDoc } from 'firebase/firestore';
+import { supabase } from '../supabaseClient';
 import { X, Link, User, Users } from 'lucide-react';
 import { useAppContext } from '../contexts/AppContext';
 
@@ -21,8 +22,8 @@ function EditDocumentModal({ isOpen, onClose, document: docToEdit, onDocumentUpd
   useEffect(() => {
     if (isOpen && docToEdit) {
         setName(docToEdit.name || '');
-        setFileURL(docToEdit.fileURL || '');
-        setExpirationDate(docToEdit.expirationDate || '');
+        setFileURL(docToEdit.file_url || '');
+        setExpirationDate(docToEdit.expiration_date || '');
         setCategory(docToEdit.category || 'Policy');
         setDescription(docToEdit.description || '');
         setAssignmentType(docToEdit.assignedTo?.type || 'all');
@@ -46,33 +47,16 @@ function EditDocumentModal({ isOpen, onClose, document: docToEdit, onDocumentUpd
     setError('');
 
     try {
-        const docRef = doc(db, 'companies', companyId, 'documents', docToEdit.id);
-        const currentAcks = docToEdit.acknowledgments || [];
-        
-        let finalAssignedEmails = [];
-        if (assignmentType === 'all') {
-            finalAssignedEmails = employees.map(e => e.email);
-        } else {
-            finalAssignedEmails = assignedEmails;
-        }
-
-        const newAcks = finalAssignedEmails.map(email => {
-            const existingAck = currentAcks.find(ack => ack.userEmail === email);
-            return existingAck || { userEmail: email, status: 'Pending', timestamp: null, notes: '' };
-        });
-
-        await updateDoc(docRef, {
-            name,
-            fileURL,
-            category,
-            description,
-            assignedTo: {
-                type: assignmentType,
-                emails: assignmentType === 'specific' ? assignedEmails : []
-            },
-            expirationDate: expirationDate || null,
-            acknowledgments: newAcks
-        });
+      await supabase
+        .from('documents')
+        .update({
+          name,
+          file_url: fileURL,
+          category,
+          description,
+          expiration_date: expirationDate || null,
+        })
+        .eq('id', docToEdit.id);
       
       onDocumentUpdated();
       onClose();

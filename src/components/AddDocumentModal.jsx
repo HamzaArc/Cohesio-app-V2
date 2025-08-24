@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
-import { db } from '../firebase';
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+// src/components/AddDocumentModal.jsx
+
+import React, { useState } from 'react';
+import { supabase } from '../supabaseClient';
 import { X, Link, User, Users } from 'lucide-react';
 import { useAppContext } from '../contexts/AppContext';
 
@@ -34,34 +35,45 @@ function AddDocumentModal({ isOpen, onClose, onDocumentAdded }) {
     setError('');
 
     try {
+      const { data: docData, error: docError } = await supabase
+        .from('documents')
+        .insert({
+          name,
+          file_url: fileURL,
+          category,
+          description,
+          expiration_date: expirationDate || null,
+          company_id: companyId,
+        })
+        .select()
+        .single();
+
+      if (docError) throw docError;
+
       let finalAssignedEmails = [];
       if (assignmentType === 'all') {
         finalAssignedEmails = employees.map(e => e.email);
       } else {
         finalAssignedEmails = assignedEmails;
       }
-
-      const acknowledgments = finalAssignedEmails.map(email => ({
-        userEmail: email,
-        status: 'Pending',
-        timestamp: null,
-        notes: ''
-      }));
-
-      await addDoc(collection(db, 'companies', companyId, 'documents'), {
-        name,
-        fileURL,
-        category,
-        description,
-        assignedTo: {
-            type: assignmentType,
-            emails: assignmentType === 'specific' ? assignedEmails : []
-        },
-        expirationDate: expirationDate || null,
-        acknowledgments,
-        created: serverTimestamp(),
-      });
       
+      const acknowledgments = finalAssignedEmails.map(email => {
+        const employee = employees.find(e => e.email === email);
+        return {
+          document_id: docData.id,
+          employee_id: employee.id,
+          user_email: email,
+          status: 'Pending',
+        };
+      });
+
+      if (acknowledgments.length > 0) {
+        const { error: ackError } = await supabase
+          .from('document_acknowledgments')
+          .insert(acknowledgments);
+        if (ackError) throw ackError;
+      }
+
       onDocumentAdded();
       handleClose();
     } catch (err) {

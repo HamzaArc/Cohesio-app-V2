@@ -1,14 +1,15 @@
+// src/pages/Training.jsx
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { Plus, BookOpen, Edit, Trash, Check, Library, Clock, Users, Eye, CheckCircle, X, Edit2 } from 'lucide-react';
-import { db, auth } from '../firebase';
-import { collection, onSnapshot, query, orderBy, doc, deleteDoc, getDocs, updateDoc } from 'firebase/firestore';
+import { supabase } from '../supabaseClient';
 import { useAppContext } from '../contexts/AppContext';
 import AddTrainingModal from '../components/AddTrainingModal';
 import EditTrainingModal from '../components/EditTrainingModal';
 import DeleteConfirmationModal from '../components/DeleteConfirmationModal';
 import StatCard from '../components/StatCard';
 
-// Moved TrainingDetailsModal into this file to have everything in one place
+// The TrainingDetailsModal is included here to maintain the original file structure
 function TrainingDetailsModal({ isOpen, onClose, program, employees }) {
   const { companyId, currentUser } = useAppContext();
   const [steps, setSteps] = useState([]);
@@ -21,25 +22,23 @@ function TrainingDetailsModal({ isOpen, onClose, program, employees }) {
   useEffect(() => {
     if (!program || !currentUser || !companyId) return;
 
-    const myParticipantRecord = program.participants.find(p => p.userEmail === currentUser.email);
-    if (myParticipantRecord) {
-        const participantRef = doc(db, 'companies', companyId, 'training', program.id, 'participants', myParticipantRecord.id);
-        const unsubscribe = onSnapshot(participantRef, (docSnap) => {
-            if (docSnap.exists()) {
-                setMyParticipant({ id: docSnap.id, ...docSnap.data() });
-            }
-        });
-        return () => unsubscribe();
-    }
+    const myParticipantRecord = program.participants.find(p => p.user_email === currentUser.email);
+    setMyParticipant(myParticipantRecord);
+
   }, [program, currentUser, companyId]);
-  
+
   useEffect(() => {
     if (program && companyId) {
-      const stepsQuery = query(collection(db, 'companies', companyId, 'training', program.id, 'steps'), orderBy('order'));
-      const unsubscribeSteps = onSnapshot(stepsQuery, (snapshot) => {
-        setSteps(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
-      });
-      return () => unsubscribeSteps();
+        const fetchSteps = async () => {
+            const { data, error } = await supabase
+                .from('training_steps')
+                .select('*')
+                .eq('program_id', program.id)
+                .order('order', { ascending: true });
+            if (error) console.error("Error fetching steps:", error);
+            else setSteps(data);
+        };
+        fetchSteps();
     }
   }, [program, companyId]);
 
@@ -48,53 +47,72 @@ function TrainingDetailsModal({ isOpen, onClose, program, employees }) {
     const employeeMap = new Map(employees.map(e => [e.email, e.name]));
     return (program.participants || []).map(p => ({
         ...p,
-        name: employeeMap.get(p.userEmail) || p.userEmail,
-        completionDate: p.completionDate?.toDate().toLocaleDateString() || null,
+        name: employeeMap.get(p.user_email) || p.user_email,
+        completionDate: p.completion_date ? new Date(p.completion_date).toLocaleDateString() : null,
     }));
   }, [program, employees]);
 
   const handleCompleteStep = async () => {
     if (!currentStepId || !myParticipant || !companyId) return;
 
-    const participantRef = doc(db, 'companies', companyId, 'training', program.id, 'participants', myParticipant.id);
-    const currentStepsStatus = Array.isArray(myParticipant.stepsStatus) ? myParticipant.stepsStatus : [];
-
+    const stepsStatus = myParticipant.steps_status || [];
+    const completedAt = new Date().toISOString();
+    
     let stepFound = false;
-    const updatedSteps = currentStepsStatus.map(s => {
+    const updatedSteps = stepsStatus.map(s => {
         if (s.stepId === currentStepId) {
             stepFound = true;
-            return { ...s, status: 'Completed', notes, completedAt: new Date() };
+            return { ...s, status: 'Completed', notes, completedAt };
         }
         return s;
     });
-    
+
     if (!stepFound) {
-        updatedSteps.push({ stepId: currentStepId, status: 'Completed', notes, completedAt: new Date() });
+        updatedSteps.push({ stepId: currentStepId, status: 'Completed', notes, completedAt });
     }
 
-    const allTemplateStepsCompleted = steps.length > 0 && steps.every(templateStep => 
+    const allTemplateStepsCompleted = steps.length > 0 && steps.every(templateStep =>
         updatedSteps.find(s => s.stepId === templateStep.id)?.status === 'Completed'
     );
-
     const finalStatus = allTemplateStepsCompleted ? 'Completed' : 'In Progress';
+    const completionDate = allTemplateStepsCompleted ? completedAt : null;
 
-    await updateDoc(participantRef, {
-        stepsStatus: updatedSteps,
-        status: finalStatus,
-        completionDate: allTemplateStepsCompleted ? new Date() : null
-    });
-    
+    const { data, error } = await supabase
+        .from('training_participants')
+        .update({
+            steps_status: updatedSteps,
+            status: finalStatus,
+            completion_date: completionDate
+        })
+        .eq('id', myParticipant.id)
+        .select()
+        .single();
+
+    if (!error && data) {
+        setMyParticipant(data); // Immediately update the local state
+    }
+
     setCurrentStepId(null);
     setNotes('');
   };
 
   const handleUpdateNote = async (stepId) => {
     if (!companyId || !myParticipant) return;
-    const participantRef = doc(db, 'companies', companyId, 'training', program.id, 'participants', myParticipant.id);
-    const updatedSteps = myParticipant.stepsStatus.map(s => 
+    const updatedSteps = myParticipant.steps_status.map(s =>
         s.stepId === stepId ? { ...s, notes: editingNote } : s
     );
-    await updateDoc(participantRef, { stepsStatus: updatedSteps });
+    
+    const { data, error } = await supabase
+        .from('training_participants')
+        .update({ steps_status: updatedSteps })
+        .eq('id', myParticipant.id)
+        .select()
+        .single();
+
+    if (!error && data) {
+        setMyParticipant(data); // Immediately update the local state
+    }
+
     setEditingStepId(null);
     setEditingNote('');
   };
@@ -109,13 +127,13 @@ function TrainingDetailsModal({ isOpen, onClose, program, employees }) {
         <div className="flex justify-between items-center p-6 border-b"><h2 className="text-2xl font-bold text-gray-800">Training Details</h2><button onClick={onClose} className="p-1 rounded-full hover:bg-gray-200"><X size={24} /></button></div>
         <div className="overflow-y-auto p-6">
             <div className="mb-6"><p className="text-sm text-gray-500">Program Name</p><h3 className="text-lg font-bold text-gray-800">{program.title}</h3>{program.description && <p className="text-sm text-gray-600 mt-1">{program.description}</p>}</div>
-            
+
             {isMyTraining ? (
                 <div>
                     <h4 className="font-bold text-gray-800 mb-2">My Progress</h4>
                     <div className="space-y-3">
                         {steps.map((step, index) => {
-                            const stepStatusData = myParticipant.stepsStatus.find(s => s.stepId === step.id);
+                            const stepStatusData = myParticipant.steps_status?.find(s => s.stepId === step.id);
                             const isCompleted = stepStatusData?.status === 'Completed';
                             return (
                                 <div key={step.id} className={`p-4 rounded-lg border transition-all ${isCompleted ? 'bg-green-50 border-green-200' : 'bg-gray-50'}`}>
@@ -124,7 +142,7 @@ function TrainingDetailsModal({ isOpen, onClose, program, employees }) {
                                         {!isCompleted && <button onClick={() => setCurrentStepId(step.id)} className="bg-blue-600 text-white font-semibold py-1 px-3 rounded-full text-xs hover:bg-blue-700 flex-shrink-0">Complete Step</button>}
                                         {isCompleted && <CheckCircle size={20} className="text-green-500 flex-shrink-0" />}
                                     </div>
-                                    
+
                                     {isCompleted && (
                                         <div className="mt-4 pt-4 border-t border-green-200">
                                             {editingStepId === step.id ? (
@@ -139,7 +157,7 @@ function TrainingDetailsModal({ isOpen, onClose, program, employees }) {
                                             ) : (
                                                 <div className="text-xs text-gray-600">
                                                     <div className="flex justify-between items-center">
-                                                        <p className="font-semibold">Completed on {stepStatusData.completedAt?.toDate().toLocaleDateString()}</p>
+                                                        <p className="font-semibold">Completed on {new Date(stepStatusData.completedAt).toLocaleDateString()}</p>
                                                         <button onClick={() => { setEditingStepId(step.id); setEditingNote(stepStatusData.notes);}} className="flex items-center gap-1 font-semibold text-blue-600 hover:underline"><Edit2 size={12}/> Edit Note</button>
                                                     </div>
                                                     {stepStatusData.notes && <p className="mt-2 pt-2 border-t border-dashed border-green-200">{stepStatusData.notes}</p>}
@@ -185,7 +203,6 @@ function TrainingDetailsModal({ isOpen, onClose, program, employees }) {
   );
 }
 
-
 const TrainingTab = ({ label, active, onClick }) => ( <button onClick={onClick} className={`py-3 px-4 text-sm font-semibold transition-colors ${ active ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500 hover:text-gray-700' }`}>{label}</button> );
 
 const categoryColors = {
@@ -214,35 +231,52 @@ function Training() {
         setLoading(false);
         return;
     }
-    const q = query(collection(db, 'companies', companyId, 'training'), orderBy('created', 'desc'));
     
-    const unsubscribe = onSnapshot(q, async (querySnapshot) => {
-      const programsList = await Promise.all(querySnapshot.docs.map(async (docSnapshot) => {
-        const programData = { id: docSnapshot.id, ...docSnapshot.data() };
-        const participantsCollection = collection(db, 'companies', companyId, 'training', docSnapshot.id, 'participants');
-        const participantsSnapshot = await getDocs(participantsCollection);
-        programData.participants = participantsSnapshot.docs.map(p => ({ id: p.id, ...p.data() }));
-        return programData;
-      }));
-      setAllPrograms(programsList);
+    const fetchTrainingData = async () => {
+      const { data, error } = await supabase
+        .from('training_programs')
+        .select(`
+          *,
+          training_participants (
+            *
+          )
+        `)
+        .eq('company_id', companyId)
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error("Error fetching training programs:", error);
+      } else {
+        setAllPrograms(data.map(p => ({...p, participants: p.training_participants})));
+      }
       setLoading(false);
-    });
-    return () => unsubscribe();
+    };
+
+    fetchTrainingData();
+
+    const channel = supabase.channel('public:training_programs')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'training_programs' }, fetchTrainingData)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'training_participants' }, fetchTrainingData)
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [companyId]);
 
   const { myPrograms, stats } = useMemo(() => {
     if (!currentUser) return { myPrograms: [], stats: {} };
 
     const my = allPrograms.filter(p => 
-      p.participants.some(participant => participant.userEmail === currentUser.email)
+      p.participants.some(participant => participant.user_email === currentUser.email)
     );
 
     const calculatedStats = {
-        inProgress: my.filter(p => p.participants.find(part => part.userEmail === currentUser.email)?.status !== 'Completed').length,
-        completed: my.filter(p => p.participants.find(part => part.userEmail === currentUser.email)?.status === 'Completed').length,
+        inProgress: my.filter(p => p.participants.find(part => part.user_email === currentUser.email)?.status !== 'Completed').length,
+        completed: my.filter(p => p.participants.find(part => part.user_email === currentUser.email)?.status === 'Completed').length,
         overdue: allPrograms.filter(p => {
-            const myParticipant = p.participants.find(part => part.userEmail === currentUser.email);
-            return p.dueDate && new Date(p.dueDate) < new Date() && myParticipant?.status !== 'Completed';
+            const myParticipant = p.participants.find(part => part.user_email === currentUser.email);
+            return p.due_date && new Date(p.due_date) < new Date() && myParticipant?.status !== 'Completed';
         }).length,
     };
 
@@ -256,16 +290,16 @@ function Training() {
   const handleDeleteConfirm = async () => {
     if (!selectedProgram || !companyId) return;
     setIsDeleting(true);
-    await deleteDoc(doc(db, 'companies', companyId, 'training', selectedProgram.id));
+    await supabase.from('training_programs').delete().eq('id', selectedProgram.id);
     setIsDeleteModalOpen(false);
     setSelectedProgram(null);
     setIsDeleting(false);
   };
   
   const TrainingCard = ({ program }) => {
-    const myParticipant = program.participants.find(p => p.userEmail === currentUser.email);
+    const myParticipant = program.participants.find(p => p.user_email === currentUser.email);
     const status = myParticipant?.status || 'Assigned';
-    const isOverdue = program.dueDate && new Date(program.dueDate) < new Date() && status !== 'Completed';
+    const isOverdue = program.due_date && new Date(program.due_date) < new Date() && status !== 'Completed';
 
     const totalParticipants = program.participants.length;
     const completedCount = program.participants.filter(p => p.status === 'Completed').length;

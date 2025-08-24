@@ -1,13 +1,14 @@
+// src/pages/Documents.jsx
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { Plus, Folder, Edit, Trash, Eye, CheckSquare, AlertCircle, FileCheck, Users, Clock, MoreVertical, MessageSquareWarning } from 'lucide-react';
-import { db, auth } from '../firebase';
-import { collection, onSnapshot, orderBy, query, doc, updateDoc, deleteDoc } from 'firebase/firestore';
+import { supabase } from '../supabaseClient';
 import { useAppContext } from '../contexts/AppContext';
 import AddDocumentModal from '../components/AddDocumentModal';
 import EditDocumentModal from '../components/EditDocumentModal';
 import DeleteConfirmationModal from '../components/DeleteConfirmationModal';
 import DocumentDetailsModal from '../components/DocumentDetailsModal';
-import RequestRevisionModal from '../components/RequestRevisionModal'; // New Component
+import RequestRevisionModal from '../components/RequestRevisionModal';
 import StatCard from '../components/StatCard';
 
 // Main Component
@@ -28,30 +29,48 @@ function Documents() {
       setLoading(false);
       return;
     }
-    const documentsCollection = collection(db, 'companies', companyId, 'documents');
-    const q = query(documentsCollection, orderBy('created', 'desc'));
-    
-    const unsubscribe = onSnapshot(q, (querySnapshot) => {
-      const documentsList = querySnapshot.docs.map(doc => {
-        const data = doc.data();
-        const isExpired = data.expirationDate && new Date(data.expirationDate) < new Date();
-        
-        const acknowledgments = Array.isArray(data.acknowledgments) ? data.acknowledgments : [];
 
-        const assignedToCurrentUser = data.assignedTo?.type === 'all' || 
-                                      (data.assignedTo?.type === 'specific' && data.assignedTo?.emails?.includes(currentUser.email));
-        return {
-          id: doc.id,
-          ...data,
-          acknowledgments,
-          isExpired,
-          assignedToCurrentUser,
-        };
-      });
-      setAllDocuments(documentsList);
+    const fetchDocuments = async () => {
+      const { data, error } = await supabase
+        .from('documents')
+        .select(`
+          *,
+          document_acknowledgments (
+            *
+          )
+        `)
+        .eq('company_id', companyId)
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error("Error fetching documents:", error);
+      } else {
+        const documentsList = data.map(doc => {
+          const isExpired = doc.expiration_date && new Date(doc.expiration_date) < new Date();
+          const assignedToCurrentUser = doc.assignedTo?.type === 'all' ||
+            (doc.assignedTo?.type === 'specific' && doc.assignedTo?.emails?.includes(currentUser.email));
+          return {
+            ...doc,
+            acknowledgments: doc.document_acknowledgments,
+            isExpired,
+            assignedToCurrentUser,
+          };
+        });
+        setAllDocuments(documentsList);
+      }
       setLoading(false);
-    });
-    return () => unsubscribe();
+    };
+
+    fetchDocuments();
+
+    const channel = supabase.channel('documents-channel')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'documents' }, fetchDocuments)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'document_acknowledgments' }, fetchDocuments)
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [currentUser, companyId]);
 
   const { myPendingDocuments, companyDocuments, stats } = useMemo(() => {
@@ -60,7 +79,7 @@ function Documents() {
     let revisionRequests = 0;
     
     allDocuments.forEach(doc => {
-      const myAcknowledgement = doc.acknowledgments.find(ack => ack.userEmail === currentUser.email);
+      const myAcknowledgement = doc.acknowledgments.find(ack => ack.user_email === currentUser.email);
       
       if (doc.assignedToCurrentUser && myAcknowledgement?.status === 'Pending' && !doc.isExpired) {
         myPending.push(doc);
@@ -73,8 +92,8 @@ function Documents() {
     });
 
     const expiringSoonCount = allDocuments.filter(d => {
-        if (!d.expirationDate) return false;
-        const diff = new Date(d.expirationDate) - new Date();
+        if (!d.expiration_date) return false;
+        const diff = new Date(d.expiration_date) - new Date();
         const days = Math.ceil(diff / (1000 * 60 * 60 * 24));
         return days > 0 && days <= 30;
     }).length;
@@ -91,18 +110,22 @@ function Documents() {
 
   const updateAcknowledgementStatus = async (docId, status, notes = '') => {
     if (!currentUser || !companyId) return;
-    const docRef = doc(db, 'companies', companyId, 'documents', docId);
+    
     const docToUpdate = allDocuments.find(d => d.id === docId);
     if (!docToUpdate) return;
+    
+    const myAcknowledgement = docToUpdate.acknowledgments.find(ack => ack.user_email === currentUser.email);
 
-    const newAcknowledgments = docToUpdate.acknowledgments.map(ack => {
-        if (ack.userEmail === currentUser.email) {
-            return { ...ack, status, notes, timestamp: new Date() };
-        }
-        return ack;
-    });
-
-    await updateDoc(docRef, { acknowledgments: newAcknowledgments });
+    if (myAcknowledgement) {
+      await supabase
+        .from('document_acknowledgments')
+        .update({
+          status,
+          notes,
+          timestamp: new Date().toISOString(),
+        })
+        .eq('id', myAcknowledgement.id);
+    }
   };
 
   const handleEditClick = (doc) => { setSelectedDocument(doc); setIsEditModalOpen(true); };
@@ -113,14 +136,17 @@ function Documents() {
   const handleDeleteConfirm = async () => {
     if (!selectedDocument || !companyId) return;
     setIsDeleting(true);
-    await deleteDoc(doc(db, 'companies', companyId, 'documents', selectedDocument.id));
+    await supabase
+        .from('documents')
+        .delete()
+        .eq('id', selectedDocument.id);
     setIsDeleteModalOpen(false);
     setSelectedDocument(null);
     setIsDeleting(false);
   };
 
   const DocumentRow = ({ doc }) => {
-    const myAcknowledgement = doc.acknowledgments.find(ack => ack.userEmail === currentUser.email);
+    const myAcknowledgement = doc.acknowledgments.find(ack => ack.user_email === currentUser.email);
     const status = myAcknowledgement?.status || 'N/A';
     
     const getStatusBadge = () => {
@@ -138,12 +164,12 @@ function Documents() {
             <td className="p-4 font-semibold text-gray-800">
                 <div className="flex items-center"><Folder className="w-5 h-5 mr-3 text-gray-400 flex-shrink-0" /><div><button onClick={() => handleDetailsClick(doc)} className="text-left hover:text-blue-600">{doc.name}</button><p className="text-xs text-gray-500 font-normal">{doc.category || 'Uncategorized'}</p></div></div>
             </td>
-            <td className="p-4 text-gray-700">{doc.created?.toDate().toLocaleDateString() || 'N/A'}</td>
+            <td className="p-4 text-gray-700">{new Date(doc.created_at).toLocaleDateString() || 'N/A'}</td>
             <td className="p-4">{getStatusBadge()}</td>
             <td className="p-4"><span className={`text-xs font-bold py-1 px-2 rounded-full ${doc.isExpired ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-700'}`}>{doc.isExpired ? 'Expired' : 'Active'}</span></td>
             <td className="p-4">
                 <div className="flex gap-2">
-                    <a href={doc.fileURL} target="_blank" rel="noopener noreferrer" className="p-2 hover:bg-gray-200 rounded-full" title="View Document"><Eye size={16} className="text-gray-600" /></a>
+                    <a href={doc.file_url} target="_blank" rel="noopener noreferrer" className="p-2 hover:bg-gray-200 rounded-full" title="View Document"><Eye size={16} className="text-gray-600" /></a>
                     {status === 'Pending' && !doc.isExpired && (
                         <>
                             <button onClick={() => updateAcknowledgementStatus(doc.id, 'Acknowledged')} className="p-2 hover:bg-gray-200 rounded-full" title="Acknowledge"><CheckSquare size={16} className="text-blue-600" /></button>

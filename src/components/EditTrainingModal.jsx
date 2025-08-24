@@ -1,6 +1,7 @@
+// src/components/EditTrainingModal.jsx
+
 import React, { useState, useEffect } from 'react';
-import { db } from '../firebase';
-import { doc, updateDoc } from 'firebase/firestore';
+import { supabase } from '../supabaseClient';
 import { X } from 'lucide-react';
 import { useAppContext } from '../contexts/AppContext';
 
@@ -20,7 +21,7 @@ function EditTrainingModal({ isOpen, onClose, program, onProgramUpdated }) {
       setTitle(program.title || '');
       setDescription(program.description || '');
       setCategory(program.category || 'Onboarding');
-      setDueDate(program.dueDate || '');
+      setDueDate(program.due_date || '');
     }
   }, [program]);
 
@@ -31,13 +32,16 @@ function EditTrainingModal({ isOpen, onClose, program, onProgramUpdated }) {
     setError('');
 
     try {
-      const docRef = doc(db, 'companies', companyId, 'training', program.id);
-      await updateDoc(docRef, {
-        title,
-        description,
-        category,
-        dueDate: dueDate || null,
-      });
+      await supabase
+        .from('training_programs')
+        .update({
+            title,
+            description,
+            category,
+            due_date: dueDate || null,
+        })
+        .eq('id', program.id);
+
       onProgramUpdated();
       onClose();
     } catch (err) {

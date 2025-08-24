@@ -1,37 +1,21 @@
+// src/components/DocumentDetailsModal.jsx
+
 import React, { useMemo } from 'react';
+import { supabase } from '../supabaseClient';
 import { X, CheckCircle, Clock, MessageSquareWarning } from 'lucide-react';
+import { useAppContext } from '../contexts/AppContext';
 
 function DocumentDetailsModal({ isOpen, onClose, document: doc, employees }) {
   const acknowledgmentStatus = useMemo(() => {
     if (!doc || !employees) return [];
+
+    const employeeMap = new Map(employees.map(e => [e.id, e.name]));
     
-    let assignedEmails = new Set();
-    if (doc.assignedTo?.type === 'all') {
-      employees.forEach(e => assignedEmails.add(e.email));
-    } else if (doc.assignedTo?.type === 'specific') {
-      (doc.assignedTo.emails || []).forEach(e => assignedEmails.add(e));
-    }
-
-    const statusMap = new Map();
-    (doc.acknowledgments || []).forEach(ack => {
-        statusMap.set(ack.userEmail, {
-            status: ack.status,
-            timestamp: ack.timestamp?.toDate().toLocaleString() || null,
-            notes: ack.notes
-        });
-    });
-
-    return employees
-      .filter(emp => assignedEmails.has(emp.email))
-      .map(emp => {
-        const ack = statusMap.get(emp.email);
-        return {
-          name: emp.name,
-          status: ack?.status || 'Pending',
-          timestamp: ack?.timestamp,
-          notes: ack?.notes
-        };
-      });
+    return (doc.acknowledgments || []).map(ack => ({
+        ...ack,
+        name: employeeMap.get(ack.employee_id) || ack.user_email,
+        timestamp: ack.timestamp ? new Date(ack.timestamp).toLocaleString() : null,
+    }));
   }, [doc, employees]);
 
   if (!isOpen || !doc) return null;

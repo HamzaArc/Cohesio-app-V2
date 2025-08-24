@@ -25,6 +25,8 @@ import Payroll from './pages/Payroll';
 import RunPayroll from './pages/RunPayroll';
 import PayrollDetails from './pages/PayrollDetails';
 import TimeOff from './pages/TimeOff';
+import Documents from './pages/Documents';
+import Training from './pages/Training';
 
 function App() {
   const [session, setSession] = useState(null);
@@ -71,6 +73,8 @@ function App() {
           <Route path="payroll/run/:runId" element={<RunPayroll />} />
           <Route path="payroll/records/:runId" element={<PayrollDetails />} />
           <Route path="time-off" element={<TimeOff />} />
+          <Route path="documents" element={<Documents />} />
+          <Route path="training" element={<Training />} />
         </Route>
 
         {/* Public Routes */}
