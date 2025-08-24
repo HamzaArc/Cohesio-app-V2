@@ -1,94 +1,111 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { X, CheckCircle, Clock, Check, Edit2 } from 'lucide-react';
-import { db, auth } from '../firebase';
-import { collection, onSnapshot, query, orderBy, doc, updateDoc } from 'firebase/firestore';
+import { supabase } from '../supabaseClient';
+import { useAppContext } from '../contexts/AppContext';
 
 function TrainingDetailsModal({ isOpen, onClose, program, employees }) {
+  const { companyId, currentUser } = useAppContext();
   const [steps, setSteps] = useState([]);
   const [notes, setNotes] = useState('');
   const [editingNote, setEditingNote] = useState('');
   const [currentStepId, setCurrentStepId] = useState(null);
   const [editingStepId, setEditingStepId] = useState(null);
   const [myParticipant, setMyParticipant] = useState(null);
-  const currentUser = auth.currentUser;
 
   useEffect(() => {
-    if (!program || !currentUser) return;
+    if (!program || !currentUser || !companyId) return;
 
-    // Listen for changes to the user's specific participant document for real-time updates
-    const myParticipantRecord = program.participants.find(p => p.userEmail === currentUser.email);
-    if (myParticipantRecord) {
-        const participantRef = doc(db, 'training', program.id, 'participants', myParticipantRecord.id);
-        const unsubscribe = onSnapshot(participantRef, (docSnap) => {
-            if (docSnap.exists()) {
-                setMyParticipant({ id: docSnap.id, ...docSnap.data() });
-            }
-        });
-        return () => unsubscribe();
-    }
-  }, [program, currentUser]);
+    const myParticipantRecord = program.participants.find(p => p.user_email === currentUser.email);
+    setMyParticipant(myParticipantRecord);
+
+  }, [program, currentUser, companyId]);
   
   useEffect(() => {
-    if (program) {
-      const stepsQuery = query(collection(db, 'training', program.id, 'steps'), orderBy('order'));
-      const unsubscribeSteps = onSnapshot(stepsQuery, (snapshot) => {
-        setSteps(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
-      });
-      return () => unsubscribeSteps();
+    if (program && companyId) {
+        const fetchSteps = async () => {
+            const { data, error } = await supabase
+                .from('training_steps')
+                .select('*')
+                .eq('program_id', program.id)
+                .order('order', { ascending: true });
+            if (error) console.error("Error fetching steps:", error);
+            else setSteps(data);
+        };
+        fetchSteps();
     }
-  }, [program]);
+  }, [program, companyId]);
 
   const allParticipantsStatus = useMemo(() => {
     if (!program || !employees) return [];
     const employeeMap = new Map(employees.map(e => [e.email, e.name]));
     return (program.participants || []).map(p => ({
         ...p,
-        name: employeeMap.get(p.userEmail) || p.userEmail,
-        completionDate: p.completionDate?.toDate().toLocaleDateString() || null,
+        name: employeeMap.get(p.user_email) || p.user_email,
+        completionDate: p.completion_date ? new Date(p.completion_date).toLocaleDateString() : null,
     }));
   }, [program, employees]);
 
   const handleCompleteStep = async () => {
-    if (!currentStepId || !myParticipant) return;
+    if (!currentStepId || !myParticipant || !companyId) return;
 
-    const participantRef = doc(db, 'training', program.id, 'participants', myParticipant.id);
-    const currentStepsStatus = Array.isArray(myParticipant.stepsStatus) ? myParticipant.stepsStatus : [];
-
+    const stepsStatus = myParticipant.steps_status || [];
+    const completedAt = new Date().toISOString();
+    
     let stepFound = false;
-    const updatedSteps = currentStepsStatus.map(s => {
+    const updatedSteps = stepsStatus.map(s => {
         if (s.stepId === currentStepId) {
             stepFound = true;
-            return { ...s, status: 'Completed', notes, completedAt: new Date() };
+            return { ...s, status: 'Completed', notes, completedAt };
         }
         return s;
     });
-    
+
     if (!stepFound) {
-        updatedSteps.push({ stepId: currentStepId, status: 'Completed', notes, completedAt: new Date() });
+        updatedSteps.push({ stepId: currentStepId, status: 'Completed', notes, completedAt });
     }
 
-    const allTemplateStepsCompleted = steps.length > 0 && steps.every(templateStep => 
+    const allTemplateStepsCompleted = steps.length > 0 && steps.every(templateStep =>
         updatedSteps.find(s => s.stepId === templateStep.id)?.status === 'Completed'
     );
-
     const finalStatus = allTemplateStepsCompleted ? 'Completed' : 'In Progress';
+    const completionDate = allTemplateStepsCompleted ? completedAt : null;
 
-    await updateDoc(participantRef, {
-        stepsStatus: updatedSteps,
-        status: finalStatus,
-        completionDate: allTemplateStepsCompleted ? new Date() : null
-    });
-    
+    const { data, error } = await supabase
+        .from('training_participants')
+        .update({
+            steps_status: updatedSteps,
+            status: finalStatus,
+            completion_date: completionDate
+        })
+        .eq('id', myParticipant.id)
+        .select()
+        .single();
+
+    if (!error && data) {
+        setMyParticipant(data); // Immediately update the local state
+    }
+
     setCurrentStepId(null);
     setNotes('');
   };
 
   const handleUpdateNote = async (stepId) => {
-    const participantRef = doc(db, 'training', program.id, 'participants', myParticipant.id);
-    const updatedSteps = myParticipant.stepsStatus.map(s => 
+    if (!companyId || !myParticipant) return;
+    const updatedSteps = myParticipant.steps_status.map(s =>
         s.stepId === stepId ? { ...s, notes: editingNote } : s
     );
-    await updateDoc(participantRef, { stepsStatus: updatedSteps });
+    
+    const { data, error } = await supabase
+        .from('training_participants')
+        .update({ steps_status: updatedSteps })
+        .eq('id', myParticipant.id)
+        .select()
+        .single();
+
+    if (!error && data) {
+        setMyParticipant(data); // Immediately update the local state
+    }
+
     setEditingStepId(null);
     setEditingNote('');
   };
@@ -109,7 +126,7 @@ function TrainingDetailsModal({ isOpen, onClose, program, employees }) {
                     <h4 className="font-bold text-gray-800 mb-2">My Progress</h4>
                     <div className="space-y-3">
                         {steps.map((step, index) => {
-                            const stepStatusData = myParticipant.stepsStatus.find(s => s.stepId === step.id);
+                            const stepStatusData = myParticipant.steps_status?.find(s => s.stepId === step.id);
                             const isCompleted = stepStatusData?.status === 'Completed';
                             return (
                                 <div key={step.id} className={`p-4 rounded-lg border transition-all ${isCompleted ? 'bg-green-50 border-green-200' : 'bg-gray-50'}`}>
@@ -133,7 +150,7 @@ function TrainingDetailsModal({ isOpen, onClose, program, employees }) {
                                             ) : (
                                                 <div className="text-xs text-gray-600">
                                                     <div className="flex justify-between items-center">
-                                                        <p className="font-semibold">Completed on {stepStatusData.completedAt?.toDate().toLocaleDateString()}</p>
+                                                        <p className="font-semibold">Completed on {new Date(stepStatusData.completedAt).toLocaleDateString()}</p>
                                                         <button onClick={() => { setEditingStepId(step.id); setEditingNote(stepStatusData.notes);}} className="flex items-center gap-1 font-semibold text-blue-600 hover:underline"><Edit2 size={12}/> Edit Note</button>
                                                     </div>
                                                     {stepStatusData.notes && <p className="mt-2 pt-2 border-t border-dashed border-green-200">{stepStatusData.notes}</p>}
