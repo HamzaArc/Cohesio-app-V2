@@ -1,6 +1,7 @@
+// src/components/RescheduleModal.jsx
+
 import React, { useState, useEffect } from 'react';
-import { db } from '../firebase';
-import { doc, updateDoc, writeBatch, collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { supabase } from '../supabaseClient'; // TIME OFF MIGRATION: Using Supabase
 import { X, AlertCircle } from 'lucide-react';
 
 function RescheduleModal({ isOpen, onClose, request, onRescheduled }) {
@@ -11,11 +12,12 @@ function RescheduleModal({ isOpen, onClose, request, onRescheduled }) {
 
   useEffect(() => {
     if (request) {
-      setStartDate(request.startDate);
-      setEndDate(request.endDate);
+      setStartDate(request.start_date);
+      setEndDate(request.end_date);
     }
   }, [request]);
 
+  // TIME OFF MIGRATION: Update request in Supabase
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!startDate || !endDate || new Date(endDate) < new Date(startDate)) {
@@ -26,22 +28,19 @@ function RescheduleModal({ isOpen, onClose, request, onRescheduled }) {
     setError('');
 
     try {
-      const batch = writeBatch(db);
+      const { error: updateError } = await supabase
+        .from('time_off_requests')
+        .update({
+          start_date: startDate,
+          end_date: endDate,
+          status: 'Pending', // Set status back to Pending
+        })
+        .eq('id', request.id);
 
-      const requestRef = doc(db, 'timeOffRequests', request.id);
-      batch.update(requestRef, {
-        startDate,
-        endDate,
-        status: 'Pending', // Set status back to Pending
-      });
+      if (updateError) throw updateError;
 
-      const historyColRef = collection(db, 'timeOffRequests', request.id, 'history');
-      batch.set(doc(historyColRef), {
-          action: 'Rescheduled',
-          timestamp: serverTimestamp(),
-      });
-
-      await batch.commit();
+      // Note: History log functionality is removed as it was Firestore-specific.
+      // This could be replaced with a database trigger in Supabase if needed.
       onRescheduled();
       onClose();
     } catch (err) {

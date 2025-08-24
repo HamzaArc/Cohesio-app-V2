@@ -1,13 +1,12 @@
+// src/components/TimeOffSettings.jsx
+
 import React, { useState, useEffect } from 'react';
-import { db } from '../firebase';
-import { doc, getDoc, setDoc, collection, onSnapshot, addDoc, deleteDoc, writeBatch, getDocs } from 'firebase/firestore';
-import { Plus, Trash2, BrainCircuit, Save, Zap, AlertCircle } from 'lucide-react';
+import { supabase } from '../supabaseClient'; // TIME OFF MIGRATION: Using Supabase
+import { Plus, Trash2, Save, Zap } from 'lucide-react';
 import { useAppContext } from '../contexts/AppContext';
 
-const countries = ["Canada", "USA", "UK", "Germany", "France", "Australia"];
-
 function TimeOffSettings() {
-  const { companyId } = useAppContext();
+  const { companyId, employees } = useAppContext(); // Get employees for manual reset
   const [weekends, setWeekends] = useState({ sat: true, sun: true });
   const [holidays, setHolidays] = useState([]);
   const [resetPolicy, setResetPolicy] = useState({
@@ -24,131 +23,76 @@ function TimeOffSettings() {
 
   const [newHolidayName, setNewHolidayName] = useState('');
   const [newHolidayDate, setNewHolidayDate] = useState('');
-  const [selectedCountry, setSelectedCountry] = useState('Canada');
-  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear() + 1);
   const [loading, setLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
-  const [aiLoading, setAiLoading] = useState(false);
 
+  // TIME OFF MIGRATION: Fetch policies and holidays from Supabase
   useEffect(() => {
     if (!companyId) {
         setLoading(false);
         return;
     }
-    const policyRef = doc(db, 'companies', companyId, 'policies', 'timeOff');
-    const holidaysColRef = collection(policyRef, 'holidays');
+    const fetchSettings = async () => {
+        // Fetch main policy (weekends, reset policy)
+        const { data: policyData, error: policyError } = await supabase
+            .from('time_off_policies')
+            .select('*')
+            .eq('company_id', companyId)
+            .maybeSingle();
 
-    const unsubscribePolicy = onSnapshot(policyRef, (docSnap) => {
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        setWeekends(data.weekends || { sat: true, sun: true });
-        if (data.resetPolicy) {
-            setResetPolicy(prev => ({ ...prev, ...data.resetPolicy }));
+        if (policyError) console.error("Error fetching policy:", policyError);
+        if (policyData) {
+            setWeekends(policyData.weekends || { sat: true, sun: true });
+            if (policyData.reset_policy) {
+                setResetPolicy(prev => ({ ...prev, ...policyData.reset_policy }));
+            }
         }
-      }
-    });
 
-    const unsubscribeHolidays = onSnapshot(holidaysColRef, (snapshot) => {
-      setHolidays(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-      setLoading(false);
-    });
+        // Fetch holidays
+        const { data: holidaysData, error: holidaysError } = await supabase
+            .from('time_off_holidays')
+            .select('*')
+            .eq('company_id', companyId);
 
-    return () => { unsubscribePolicy(); unsubscribeHolidays(); };
+        if (holidaysError) console.error("Error fetching holidays:", holidaysError);
+        else setHolidays(holidaysData);
+
+        setLoading(false);
+    };
+
+    fetchSettings();
+
+    // Set up realtime listeners
+    const holidaysChannel = supabase.channel(`holidays:${companyId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'time_off_holidays', filter: `company_id=eq.${companyId}` }, fetchSettings)
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(holidaysChannel);
+    };
   }, [companyId]);
 
   const handleWeekendChange = async (day) => {
     if (!companyId) return;
     const newWeekends = { ...weekends, [day]: !weekends[day] };
     setWeekends(newWeekends);
-    await setDoc(doc(db, 'companies', companyId, 'policies', 'timeOff'), { weekends: newWeekends }, { merge: true });
+    await supabase.from('time_off_policies').upsert({ company_id: companyId, weekends: newWeekends }, { onConflict: 'company_id' });
   };
 
   const handleAddHoliday = async (e) => {
     e.preventDefault();
     if (!newHolidayName || !newHolidayDate || !companyId) return;
-    const policyRef = doc(db, 'companies', companyId, 'policies', 'timeOff');
-    await addDoc(collection(policyRef, 'holidays'), { name: newHolidayName, date: newHolidayDate });
+    await supabase.from('time_off_holidays').insert({ company_id: companyId, name: newHolidayName, date: newHolidayDate });
     setNewHolidayName('');
     setNewHolidayDate('');
   };
 
   const handleDeleteHoliday = async (holidayId) => {
     if (!companyId) return;
-    await deleteDoc(doc(db, 'companies', companyId, 'policies', 'timeOff', 'holidays', holidayId));
+    await supabase.from('time_off_holidays').delete().eq('id', holidayId);
   };
-
-  const handleFetchHolidays = async () => {
-    if (!companyId) return;
-    setAiLoading(true);
-    const prompt = `List all official public holidays for ${selectedCountry} for the year ${selectedYear}.`;
-
-    try {
-        let chatHistory = [];
-        chatHistory.push({ role: "user", parts: [{ text: prompt }] });
-
-        const payload = {
-            contents: chatHistory,
-            generationConfig: {
-                responseMimeType: "application/json",
-                responseSchema: {
-                    type: "ARRAY",
-                    items: {
-                        type: "OBJECT",
-                        properties: {
-                            "holidayName": { "type": "STRING" },
-                            "holidayDate": { "type": "STRING", "description": "Date in YYYY-MM-DD format" }
-                        },
-                        required: ["holidayName", "holidayDate"]
-                    }
-                }
-            }
-        };
-        
-        // NOTE: This API key is a placeholder and will not work.
-        // Replace "YOUR_GEMINI_API_KEY" with a valid key to enable this feature.
-        const apiKey = "YOUR_GEMINI_API_KEY";
-        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
-
-        const response = await fetch(apiUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        });
-
-        if (!response.ok) {
-            const errorBody = await response.json().catch(() => null);
-            const errorMessage = errorBody?.error?.message || `API request failed with status ${response.status}`;
-            throw new Error(errorMessage);
-        }
-
-        const result = await response.json();
-        const text = result?.candidates?.[0]?.content?.parts?.[0]?.text;
-
-        if (text) {
-            const fetchedHolidays = JSON.parse(text);
-            const batch = writeBatch(db);
-            const policyRef = doc(db, 'companies', companyId, 'policies', 'timeOff');
-
-            fetchedHolidays.forEach(holiday => {
-                const newHolidayRef = doc(collection(policyRef, 'holidays'));
-                batch.set(newHolidayRef, { name: holiday.holidayName, date: holiday.holidayDate });
-            });
-
-            await batch.commit();
-        } else {
-            throw new Error("Could not parse holidays from AI response.");
-        }
-
-    } catch (error) {
-        console.error("Error fetching holidays with AI:", error);
-        alert(`AI Assistant Error: I couldn't fetch the holidays.\n\nReason: ${error.message}\n\nPlease try again or add them manually.`);
-    } finally {
-        setAiLoading(false);
-    }
-  };
-
 
   const handlePolicyChange = (e) => {
     const { id, value, type, checked } = e.target;
@@ -160,8 +104,7 @@ function TimeOffSettings() {
     setIsSaving(true);
     setSaveSuccess(false);
     try {
-      const docRef = doc(db, 'companies', companyId, 'policies', 'timeOff');
-      await setDoc(docRef, { resetPolicy }, { merge: true });
+      await supabase.from('time_off_policies').upsert({ company_id: companyId, reset_policy: resetPolicy }, { onConflict: 'company_id' });
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 2000);
     } catch (error) {
@@ -185,26 +128,21 @@ function TimeOffSettings() {
 
     setIsResetting(true);
     try {
-      const employeesSnapshot = await getDocs(collection(db, 'companies', companyId, 'employees'));
-      const batch = writeBatch(db);
+        const updates = employees.map(employee => {
+            const updateData = {};
+            if (resetPolicy.resetVacation) updateData.vacation_balance = Number(resetPolicy.vacationMax);
+            if (resetPolicy.resetSick) updateData.sick_balance = Number(resetPolicy.sickMax);
+            if (resetPolicy.resetPersonal) updateData.personal_balance = Number(resetPolicy.personalMax);
+            return supabase.from('employees').update(updateData).eq('id', employee.id);
+        });
 
-      employeesSnapshot.forEach(employeeDoc => {
-        const employeeRef = doc(db, 'companies', companyId, 'employees', employeeDoc.id);
-        const updateData = {};
-        if (resetPolicy.resetVacation) updateData.vacationBalance = Number(resetPolicy.vacationMax);
-        if (resetPolicy.resetSick) updateData.sickBalance = Number(resetPolicy.sickMax);
-        if (resetPolicy.resetPersonal) updateData.personalBalance = Number(resetPolicy.personalMax);
+        await Promise.all(updates);
 
-        if (Object.keys(updateData).length > 0) {
-            batch.update(employeeRef, updateData);
-        }
-      });
+      const newResetPolicy = { ...resetPolicy, lastResetYear: currentYear };
+      await supabase.from('time_off_policies').upsert({ company_id: companyId, reset_policy: newResetPolicy }, { onConflict: 'company_id' });
+      setResetPolicy(newResetPolicy);
 
-      const policyRef = doc(db, 'companies', companyId, 'policies', 'timeOff');
-      batch.set(policyRef, { resetPolicy: { ...resetPolicy, lastResetYear: currentYear } }, { merge: true });
-
-      await batch.commit();
-      alert(`Successfully reset balances for ${employeesSnapshot.size} employees.`);
+      alert(`Successfully reset balances for ${employees.length} employees.`);
     } catch (error) {
         console.error("Error resetting balances:", error);
         alert("An error occurred while resetting balances.");
@@ -213,6 +151,7 @@ function TimeOffSettings() {
     }
   };
 
+
   if (loading) {
     return <div className="p-6 text-center">Loading settings...</div>;
   }
@@ -220,7 +159,6 @@ function TimeOffSettings() {
   return (
     <div className="p-6 bg-white rounded-b-lg shadow-sm border border-gray-200 border-t-0">
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        {/* Weekend & Holiday Policy Section */}
         <div className="space-y-6">
             <div>
               <h3 className="text-lg font-bold text-gray-800 mb-4">Weekend Definition</h3>
@@ -238,16 +176,6 @@ function TimeOffSettings() {
             <div>
               <h3 className="text-lg font-bold text-gray-800 mb-4">Public Holidays</h3>
               <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
-                <div className="grid grid-cols-2 gap-2 mb-4">
-                    <select value={selectedCountry} onChange={e => setSelectedCountry(e.target.value)} className="border border-gray-300 rounded-md shadow-sm p-2 text-sm">
-                        {countries.map(c => <option key={c} value={c}>{c}</option>)}
-                    </select>
-                    <input type="number" value={selectedYear} onChange={e => setSelectedYear(e.target.value)} className="border border-gray-300 rounded-md shadow-sm p-2 text-sm" />
-                </div>
-                <button onClick={handleFetchHolidays} disabled={aiLoading} className="w-full mb-4 flex items-center justify-center gap-2 text-sm font-semibold text-blue-600 bg-blue-50 hover:bg-blue-100 border border-blue-200 py-2 px-4 rounded-lg disabled:opacity-50">
-                    <BrainCircuit size={16} />
-                    {aiLoading ? 'Fetching Holidays...' : 'Use AI to fetch holidays'}
-                </button>
                 <div className="space-y-2 mb-4 max-h-40 overflow-y-auto">
                   {holidays.map(holiday => (
                     <div key={holiday.id} className="flex justify-between items-center bg-white p-2 rounded-md border">
@@ -268,7 +196,6 @@ function TimeOffSettings() {
             </div>
         </div>
 
-        {/* Annual Reset Policy Section */}
         <div>
           <h3 className="text-lg font-bold text-gray-800 mb-4">Annual Balance Reset Policy</h3>
           <div className="bg-gray-50 p-4 rounded-lg border border-gray-200 space-y-4">

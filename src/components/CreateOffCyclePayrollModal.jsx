@@ -1,12 +1,13 @@
+// src/components/CreateOffCyclePayrollModal.jsx
+
 import React, { useState } from 'react';
-import { db } from '../firebase';
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { supabase } from '../supabaseClient'; // MIGRATION: Using Supabase
 import { X, Plus, Trash2 } from 'lucide-react';
-import { useAppContext } from '../contexts/AppContext'; // Import our new hook
+import { useAppContext } from '../contexts/AppContext';
 
 function CreateOffCyclePayrollModal({ isOpen, onClose, onPayrollRun }) {
-  const { employees } = useAppContext(); // Use the App Brain
-  const [selectedEmployee, setSelectedEmployee] = useState(null);
+  const { employees, companyId } = useAppContext();
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState('');
   const [payDay, setPayDay] = useState('');
   const [reason, setReason] = useState('Final Pay');
   const [lineItems, setLineItems] = useState([]);
@@ -25,9 +26,10 @@ function CreateOffCyclePayrollModal({ isOpen, onClose, onPayrollRun }) {
     setLineItems(lineItems.map(item => item.id === id ? { ...item, [field]: value } : item));
   };
 
+  // MIGRATION: Updated to insert an off-cycle run into the payroll_runs table
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!selectedEmployee || !payDay) {
+    if (!selectedEmployeeId || !payDay || !companyId) {
       setError('Please select an employee and a pay day.');
       return;
     }
@@ -36,22 +38,32 @@ function CreateOffCyclePayrollModal({ isOpen, onClose, onPayrollRun }) {
 
     try {
       const grossPay = lineItems.reduce((sum, item) => sum + (Number(item.total) || 0), 0);
-      
-      await addDoc(collection(db, 'payrollRuns'), {
-        payPeriodId: `off-cycle-${Date.now()}`,
-        periodSpans: `Off-Cycle: ${reason}`,
-        payDay,
-        totalGrossPay: grossPay,
-        totalNetPay: grossPay, // Placeholder
-        employeePayData: [{
-            employeeId: selectedEmployee.id,
-            employeeName: selectedEmployee.name,
-            lineItems: lineItems.map(({id, ...rest}) => rest)
-        }],
-        runAt: serverTimestamp(),
-        type: 'Off-Cycle'
-      });
-      
+      const selectedEmployee = employees.find(emp => emp.id === selectedEmployeeId);
+
+      const employeeDataPayload = {
+        [selectedEmployeeId]: {
+            baseSalary: 0, // Off-cycle runs typically don't include base salary
+            bonuses: grossPay, // Sum of line items can be considered a bonus/special payment
+            ...Object.fromEntries(lineItems.map(item => [item.description, item.total]))
+        }
+      };
+
+      const { error: insertError } = await supabase
+        .from('payroll_runs')
+        .insert({
+            company_id: companyId,
+            period: `off-cycle-${Date.now()}`,
+            period_label: `Off-Cycle: ${selectedEmployee.name} - ${reason}`,
+            status: 'Finalized', // Off-cycle runs are typically finalized immediately
+            total_gross_pay: grossPay,
+            total_net_pay: grossPay, // Assuming no deductions for simplicity
+            employee_data: employeeDataPayload,
+            finalized_at: new Date().toISOString(),
+            type: 'Off-Cycle'
+        });
+
+      if (insertError) throw insertError;
+
       onPayrollRun();
       handleClose();
     } catch (err) {
@@ -63,7 +75,7 @@ function CreateOffCyclePayrollModal({ isOpen, onClose, onPayrollRun }) {
   };
 
   const handleClose = () => {
-    setSelectedEmployee(null); setPayDay(''); setReason('Final Pay');
+    setSelectedEmployeeId(''); setPayDay(''); setReason('Final Pay');
     setLineItems([]); setError(''); onClose();
   };
 
@@ -79,11 +91,17 @@ function CreateOffCyclePayrollModal({ isOpen, onClose, onPayrollRun }) {
         <form onSubmit={handleSubmit} className="overflow-y-auto p-1">
           <div className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div><label htmlFor="employee" className="block text-sm font-medium text-gray-700">Select Employee</label><select id="employee" onChange={(e) => setSelectedEmployee(employees.find(emp => emp.id === e.target.value))} className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2"><option value="">Choose employee...</option>{employees.map(emp => <option key={emp.id} value={emp.id}>{emp.name}</option>)}</select></div>
+                <div>
+                    <label htmlFor="employee" className="block text-sm font-medium text-gray-700">Select Employee</label>
+                    <select id="employee" value={selectedEmployeeId} onChange={(e) => setSelectedEmployeeId(e.target.value)} className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2">
+                        <option value="">Choose employee...</option>
+                        {employees.map(emp => <option key={emp.id} value={emp.id}>{emp.name}</option>)}
+                    </select>
+                </div>
                 <div><label htmlFor="payDay" className="block text-sm font-medium text-gray-700">Pay Day</label><input type="date" id="payDay" value={payDay} onChange={(e) => setPayDay(e.target.value)} className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2" /></div>
             </div>
             <div><label htmlFor="reason" className="block text-sm font-medium text-gray-700">Reason</label><input type="text" id="reason" value={reason} onChange={(e) => setReason(e.target.value)} className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2" /></div>
-            
+
             <div className="pt-4">
                 <h3 className="text-lg font-semibold text-gray-700 mb-2">Earnings & Deductions</h3>
                 <div className="space-y-2">

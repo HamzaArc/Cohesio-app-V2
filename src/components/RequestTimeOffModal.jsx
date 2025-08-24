@@ -1,10 +1,11 @@
+// src/components/RequestTimeOffModal.jsx
+
 import React, { useState, useEffect, useMemo } from 'react';
-import { db, auth } from '../firebase';
-import { collection, addDoc, serverTimestamp, doc, writeBatch, increment, query, where, getDocs } from 'firebase/firestore';
+import { supabase } from '../supabaseClient'; // TIME OFF MIGRATION: Using Supabase
 import { X, AlertCircle, Users, ArrowRight } from 'lucide-react';
 import { useAppContext } from '../contexts/AppContext';
 
-// --- Helper Functions ---
+// Helper functions remain unchanged
 const isWeekend = (date, weekends = { sat: true, sun: true }) => {
     const day = date.getDay();
     const map = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 };
@@ -50,8 +51,8 @@ function calculateBusinessDays(startDate, endDate, weekends, holidays) {
   return count;
 }
 
-// --- Main Component ---
-function RequestTimeOffModal({ isOpen, onClose, onrequestSubmitted, currentUserProfile, myRequests, weekends, holidays, allRequests, myTeam }) {
+// Main Component
+function RequestTimeOffModal({ isOpen, onClose, onrequestSubmitted, currentUserProfile, weekends, holidays, allRequests, myTeam }) {
   const { companyId, currentUser } = useAppContext();
   const [leaveType, setLeaveType] = useState('Vacation');
   const [startDate, setStartDate] = useState('');
@@ -61,8 +62,8 @@ function RequestTimeOffModal({ isOpen, onClose, onrequestSubmitted, currentUserP
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [suggestedDates, setSuggestedDates] = useState(null);
-  
-  const balanceFieldMap = { 'Vacation': 'vacationBalance', 'Sick Day': 'sickBalance', 'Personal (Unpaid)': 'personalBalance' };
+
+  const balanceFieldMap = { 'Vacation': 'vacation_balance', 'Sick Day': 'sick_balance', 'Personal (Unpaid)': 'personal_balance' };
 
   useEffect(() => {
     if (isOpen) {
@@ -76,18 +77,19 @@ function RequestTimeOffModal({ isOpen, onClose, onrequestSubmitted, currentUserP
       const days = calculateBusinessDays(startDate, endDate, weekends, holidays);
       setTotalDays(days);
       setError('');
-      setSuggestedDates(null); // Clear suggestion when dates change
+      setSuggestedDates(null);
     } else {
       setTotalDays(0);
       if (startDate && endDate) { setError('End date cannot be before the start date.'); }
     }
   }, [startDate, endDate, weekends, holidays]);
 
+  // TIME OFF MIGRATION: Updated handleSubmit to use Supabase
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (error || !startDate || !endDate || totalDays <= 0 || !companyId) { 
-        setError('Please select a valid date range.'); 
-        return; 
+    if (error || !startDate || !endDate || totalDays <= 0 || !companyId) {
+        setError('Please select a valid date range.');
+        return;
     }
     setLoading(true);
     setError('');
@@ -104,23 +106,29 @@ function RequestTimeOffModal({ isOpen, onClose, onrequestSubmitted, currentUserP
         setLoading(false);
         return;
       }
-      
-      const requestsRef = collection(db, 'companies', companyId, 'timeOffRequests');
-      const userExistingRequestsQuery = query(requestsRef, where("userEmail", "==", currentUser.email), where("status", "in", ["Pending", "Approved"]));
-      const userRequestsSnapshot = await getDocs(userExistingRequestsQuery);
-      const userExistingRequests = userRequestsSnapshot.docs.map(doc => doc.data());
-      
-      const isOverlapping = userExistingRequests.some(req => new Date(startDate) <= new Date(req.endDate) && new Date(endDate) >= new Date(req.startDate));
+
+      // Check for overlapping requests
+      const { data: userExistingRequests, error: fetchError } = await supabase
+        .from('time_off_requests')
+        .select('*')
+        .eq('company_id', companyId)
+        .eq('user_email', currentUser.email)
+        .in('status', ['Pending', 'Approved']);
+
+      if (fetchError) throw fetchError;
+
+      const isOverlapping = userExistingRequests.some(req => new Date(startDate) <= new Date(req.end_date) && new Date(endDate) >= new Date(req.start_date));
 
       if (isOverlapping) {
           setError("You already have a request that overlaps with these dates.");
+          // Suggestion logic can remain the same
           let nextStart = new Date(startDate);
           const duration = (new Date(endDate) - new Date(startDate));
-          
+
           while(true) {
               nextStart.setDate(nextStart.getDate() + 1);
               let nextEnd = new Date(nextStart.getTime() + duration);
-              let conflict = userExistingRequests.some(req => nextStart <= new Date(req.endDate) && nextEnd >= new Date(req.startDate));
+              let conflict = userExistingRequests.some(req => nextStart <= new Date(req.end_date) && nextEnd >= new Date(req.start_date));
               if (!conflict) {
                   setSuggestedDates({
                       start: nextStart.toISOString().split('T')[0],
@@ -133,18 +141,36 @@ function RequestTimeOffModal({ isOpen, onClose, onrequestSubmitted, currentUserP
           return;
       }
 
-      const batch = writeBatch(db);
-      const newRequestRef = doc(requestsRef);
-      batch.set(newRequestRef, { 
-        leaveType, startDate, endDate, description, totalDays,
-        status: 'Pending', requestedAt: serverTimestamp(), userEmail: currentUser.email,
-      });
+      // Insert the new request
+      const { data: newRequest, error: insertError } = await supabase
+        .from('time_off_requests')
+        .insert({
+            company_id: companyId,
+            employee_id: currentUserProfile.id,
+            user_email: currentUser.email,
+            leave_type: leaveType,
+            start_date: startDate,
+            end_date: endDate,
+            total_days: totalDays,
+            description: description,
+            status: 'Pending',
+        })
+        .select()
+        .single();
+
+      if (insertError) throw insertError;
+
+      // Decrement the balance if it's not unpaid leave
       if (leaveType !== 'Personal (Unpaid)') {
-        const employeeRef = doc(db, 'companies', companyId, 'employees', currentUserProfile.id);
-        batch.update(employeeRef, { [balanceField]: increment(-totalDays) });
+        const { error: updateError } = await supabase.rpc('decrement_leave_balance', {
+            employee_id_param: currentUserProfile.id,
+            field_name_param: balanceField,
+            decrement_value_param: totalDays
+        })
+        if (updateError) throw updateError;
       }
-      await batch.commit();
-      onrequestSubmitted(newRequestRef.id);
+
+      onrequestSubmitted(newRequest.id);
       handleClose();
     } catch (err) {
       setError('Failed to submit request. Please try again.');
@@ -153,6 +179,7 @@ function RequestTimeOffModal({ isOpen, onClose, onrequestSubmitted, currentUserP
       setLoading(false);
     }
   };
+
 
   const handleApplySuggestion = () => {
       if (suggestedDates) {
@@ -175,11 +202,11 @@ function RequestTimeOffModal({ isOpen, onClose, onrequestSubmitted, currentUserP
     const start = new Date(startDate);
     const end = new Date(endDate);
 
-    return allRequests.filter(req => 
+    return allRequests.filter(req =>
       req.status === 'Approved' &&
-      teamEmails.has(req.userEmail) &&
-      start <= new Date(req.endDate) &&
-      end >= new Date(req.startDate)
+      teamEmails.has(req.user_email) &&
+      start <= new Date(req.end_date) &&
+      end >= new Date(req.start_date)
     );
   }, [myTeam, allRequests, startDate, endDate]);
 
@@ -214,7 +241,7 @@ function RequestTimeOffModal({ isOpen, onClose, onrequestSubmitted, currentUserP
               <label htmlFor="description" className="block text-sm font-medium text-gray-700">Description (Optional)</label>
               <textarea id="description" value={description} onChange={(e) => setDescription(e.target.value)} rows="2" className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2"></textarea>
             </div>
-            
+
             <div className="md:col-span-2 p-4 bg-gray-50 border border-gray-200 rounded-lg space-y-3">
               <h3 className="font-semibold text-gray-800 text-sm">Summary</h3>
               <div className="flex justify-between items-center text-sm">
@@ -240,12 +267,12 @@ function RequestTimeOffModal({ isOpen, onClose, onrequestSubmitted, currentUserP
                         <h3 className="font-semibold text-yellow-800 text-sm">Team Members Also Away</h3>
                     </div>
                     <ul className="text-xs text-yellow-700 mt-2 pl-8 list-disc">
-                        {teamAvailability.map(req => <li key={req.id}>{req.employeeName} ({req.startDate} to {req.endDate})</li>)}
+                        {teamAvailability.map(req => <li key={req.id}>{req.employeeName} ({req.start_date} to {req.end_date})</li>)}
                     </ul>
                 </div>
             )}
           </div>
-          
+
           {error && <p className="text-red-500 text-sm mt-4 flex items-center"><AlertCircle size={16} className="mr-2"/>{error}</p>}
 
           {suggestedDates && (

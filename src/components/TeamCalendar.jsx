@@ -1,3 +1,5 @@
+// src/components/TeamCalendar.jsx
+
 import React, { useState, useMemo } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 
@@ -8,19 +10,18 @@ const getMonthName = (monthIndex) => {
 
 const getDaysInMonth = (year, month) => new Date(year, month + 1, 0).getDate();
 
-// Simple hash function to get a color index from an employee's email
 const getHash = (input) => {
   let hash = 0;
   for (let i = 0; i < input.length; i++) {
     const char = input.charCodeAt(i);
     hash = (hash << 5) - hash + char;
-    hash = hash & hash; // Convert to 32bit integer
+    hash = hash & hash;
   }
   return Math.abs(hash);
 }
 
 const colorPalette = [
-  'bg-blue-400', 'bg-green-400', 'bg-purple-400', 'bg-red-400', 
+  'bg-blue-400', 'bg-green-400', 'bg-purple-400', 'bg-red-400',
   'bg-yellow-400', 'bg-indigo-400', 'bg-pink-400', 'bg-teal-400'
 ];
 
@@ -56,7 +57,7 @@ function TeamCalendar({ events, employees, weekends, holidays, onDayClick }) {
   const calendarGrid = useMemo(() => {
     const daysInMonth = getDaysInMonth(currentYear, currentMonth);
     const firstDayOfMonth = new Date(currentYear, currentMonth, 1).getDay();
-    
+
     const holidayDates = new Set(holidays.map(h => h.date));
     const weekendDays = Object.keys(weekends).filter(day => weekends[day]).map(day => {
         const map = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 };
@@ -65,25 +66,26 @@ function TeamCalendar({ events, employees, weekends, holidays, onDayClick }) {
 
     const grid = [];
     for (let i = 0; i < firstDayOfMonth; i++) grid.push({ key: `blank-${i}` });
-    
+
     for (let day = 1; day <= daysInMonth; day++) {
       const date = new Date(currentYear, currentMonth, day);
       date.setMinutes(date.getMinutes() + date.getTimezoneOffset());
       const dateString = date.toISOString().split('T')[0];
       const dayOfWeek = date.getDay();
 
+      // MIGRATION FIX: Changed event.startDate to event.start_date and event.endDate to event.end_date
       const dayEvents = events.filter(event => {
-        const startDate = new Date(event.startDate);
-        const endDate = new Date(event.endDate);
+        const startDate = new Date(event.start_date);
+        const endDate = new Date(event.end_date);
         startDate.setHours(0,0,0,0);
         endDate.setHours(0,0,0,0);
         date.setHours(0,0,0,0);
         return date >= startDate && date <= endDate;
       });
-      
+
       const leaveDensity = employees.length > 0 ? dayEvents.length / employees.length : 0;
-      
-      grid.push({ 
+
+      grid.push({
         key: `day-${day}`, day, date, events: dayEvents,
         isWeekend: weekendDays.includes(dayOfWeek),
         isHoliday: holidayDates.has(dateString),
@@ -95,7 +97,7 @@ function TeamCalendar({ events, employees, weekends, holidays, onDayClick }) {
   }, [currentYear, currentMonth, events, weekends, holidays, employees]);
 
   const weekDays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-  
+
   const getHeatmapStyle = (density) => {
       if (density === 0) return '';
       if (density <= 0.25) return 'bg-yellow-100';
@@ -123,8 +125,8 @@ function TeamCalendar({ events, employees, weekends, holidays, onDayClick }) {
           <div key={day} className="text-center font-semibold text-sm py-2 bg-gray-50 text-gray-600">{day}</div>
         ))}
         {calendarGrid.map(cell => (
-          <button 
-            key={cell.key} 
+          <button
+            key={cell.key}
             onClick={() => cell.day && onDayClick(cell.date, cell.events)}
             className={`h-28 p-1 overflow-y-auto text-left align-top transition-colors ${cell.isWeekend ? 'bg-gray-50' : 'bg-white'} ${getHeatmapStyle(cell.leaveDensity)}`}
             disabled={!cell.day}
@@ -137,7 +139,7 @@ function TeamCalendar({ events, employees, weekends, holidays, onDayClick }) {
                     </div>
                 )}
                 {cell.events?.map(event => (
-                    <div key={event.id} className={`p-1.5 text-white text-xs rounded-lg truncate ${employeeColorMap.get(event.userEmail) || 'bg-gray-400'}`}>
+                    <div key={event.id} className={`p-1.5 text-white text-xs rounded-lg truncate ${employeeColorMap.get(event.user_email) || 'bg-gray-400'}`}>
                         {event.employeeName}
                     </div>
                 ))}

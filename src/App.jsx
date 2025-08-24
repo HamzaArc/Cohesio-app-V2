@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
-import { supabase } from './supabaseClient'; // CORRECT: Using Supabase
+import { supabase } from './supabaseClient';
 
 import Layout from './components/Layout';
 import Login from './pages/Login';
@@ -20,14 +20,14 @@ import Careers from './pages/Careers';
 import Contact from './pages/Contact';
 import Privacy from './pages/Privacy';
 import Terms from './pages/Terms';
-
-// --- PAYROLL MIGRATION: Routes are now uncommented ---
 import Payroll from './pages/Payroll';
 import RunPayroll from './pages/RunPayroll';
 import PayrollDetails from './pages/PayrollDetails';
 
+// --- TIME OFF MIGRATION: Route is now uncommented ---
+import TimeOff from './pages/TimeOff';
+
 // --- Out-of-scope pages remain commented out ---
-// import TimeOff from './pages/TimeOff';
 // import Surveys from './pages/Surveys';
 // import SurveyStudio from './pages/SurveyStudio';
 // import TakeSurvey from './pages/TakeSurvey';
@@ -79,15 +79,14 @@ function App() {
           <Route path="profile" element={<Profile />} />
           <Route path="people" element={<People />} />
           <Route path="people/:employeeId" element={<EmployeeProfile />} />
-
-          {/* --- PAYROLL MIGRATION: All payroll routes are now active --- */}
           <Route path="payroll" element={<Payroll />} />
           <Route path="payroll/run/:runId" element={<RunPayroll />} />
           <Route path="payroll/records/:runId" element={<PayrollDetails />} />
 
+          {/* --- TIME OFF MIGRATION: Route is now active --- */}
+          <Route path="time-off" element={<TimeOff />} />
 
           {/* --- Out-of-scope routes remain commented out --- */}
-          {/* <Route path="time-off" element={<TimeOff />} /> */}
           {/* <Route path="surveys" element={<Surveys />} /> */}
           {/* <Route path="documents" element={<Documents />} /> */}
           {/* <Route path="training" element={<Training />} /> */}
