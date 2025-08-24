@@ -23,16 +23,19 @@ function AcceptInvite() {
         return;
       }
 
-      // Use the secure RPC function to get invitation details
-      const { data, error } = await supabase.rpc('get_invitation_details', {
-        invitation_token: token,
-      });
+      // This is the key change: Querying the table directly instead of using an RPC function.
+      const { data, error: selectError } = await supabase
+        .from('invitations')
+        .select('email, company_id')
+        .eq('token', token)
+        .single();
 
-      if (error || !data || data.length === 0) {
+      if (selectError || !data) {
+        console.error('Error verifying token:', selectError);
         setError("This invitation is invalid or has expired.");
         setInvitation(null);
       } else {
-        setInvitation(data[0]); // The function returns an array
+        setInvitation(data);
       }
       setLoading(false);
     };

@@ -10,7 +10,6 @@ import DeleteConfirmationModal from '../components/DeleteConfirmationModal';
 import DayDrawer from '../components/DayDrawer';
 import TimeOffSettings from '../components/TimeOffSettings';
 import RescheduleModal from '../components/RescheduleModal';
-// MIGRATION FIX: Import the restored RequestDetailsModal
 import RequestDetailsModal from '../components/RequestDetailsModal';
 
 const BalanceCard = ({ icon, title, balance, bgColor, iconColor }) => ( <div className="bg-white p-6 rounded-lg shadow-sm flex flex-col items-start border border-gray-200"><div className={`p-2 rounded-lg mb-4 ${bgColor}`}>{React.cloneElement(icon, { className: `w-6 h-6 ${iconColor}` })}</div><p className="text-sm text-gray-500">{title}</p><p className="text-3xl font-bold text-gray-800">{balance}</p><p className="text-sm text-gray-500">Days Balance Today</p></div> );
@@ -23,7 +22,6 @@ function TimeOff() {
   const [currentUserProfile, setCurrentUserProfile] = useState(null);
   const [myTeam, setMyTeam] = useState([]);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-  // MIGRATION FIX: State for the details modal is restored
   const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [isRescheduleModalOpen, setIsRescheduleModalOpen] = useState(false);
@@ -158,7 +156,6 @@ function TimeOff() {
     setIsDeleteModalOpen(false); setSelectedRequest(null); setIsDeleting(false);
   };
 
-  // MIGRATION FIX: Handlers for the details modal are restored
   const handleWithdrawRequest = (request) => { setIsDetailsModalOpen(false); handleDeleteClick(request); };
   const handleRescheduleClick = (request) => { setSelectedRequest(request); setIsDetailsModalOpen(false); setTimeout(() => setIsRescheduleModalOpen(true), 100); };
   const handleRowClick = (request) => { setSelectedRequest(request); setIsDetailsModalOpen(true); };
@@ -175,7 +172,6 @@ function TimeOff() {
   return (
     <>
       <RequestTimeOffModal isOpen={isAddModalOpen} onClose={() => setIsAddModalOpen(false)} onrequestSubmitted={handleRequestSubmitted} currentUserProfile={currentUserProfile} weekends={weekends} holidays={holidays} allRequests={requestsWithNameAndDept} myTeam={myTeam} />
-      {/* MIGRATION FIX: The details modal is now rendered */}
       <RequestDetailsModal isOpen={isDetailsModalOpen} onClose={() => setIsDetailsModalOpen(false)} request={selectedRequest} onWithdraw={handleWithdrawRequest} onReschedule={handleRescheduleClick} />
       <RescheduleModal isOpen={isRescheduleModalOpen} onClose={() => setIsRescheduleModalOpen(false)} request={selectedRequest} onRescheduled={handleRescheduleSubmitted} />
       <DeleteConfirmationModal isOpen={isDeleteModalOpen} onClose={() => setIsDeleteModalOpen(false)} onConfirm={handleDeleteConfirm} employeeName={`request from ${selectedRequest?.start_date}`} loading={isDeleting} />
@@ -203,28 +199,69 @@ function TimeOff() {
             </div>
 
              {activeTab === 'Requests' && (
-                <div className="p-6">
-                    <table className="w-full text-left">
-                        <thead><tr className="border-b border-gray-200"><th className="p-4 font-semibold text-gray-500 text-sm">Employee</th><th className="p-4 font-semibold text-gray-500 text-sm">Leave Type</th><th className="p-4 font-semibold text-gray-500 text-sm">Dates</th><th className="p-4 font-semibold text-gray-500 text-sm">Status</th><th className="p-4 font-semibold text-gray-500 text-sm">Actions</th></tr></thead>
-                        <tbody>
-                            {loading ? (<tr><td colSpan="5" className="p-4 text-center">Loading...</td></tr>)
-                            : filteredRequestsForList.map(req => (
-                                <tr key={req.id} className="border-b border-gray-100 last:border-b-0 hover:bg-gray-50">
-                                    <td className="p-4 font-semibold text-gray-800">{req.employeeName}</td>
-                                    <td className="p-4 text-gray-700">{req.leave_type}</td>
-                                    <td className="p-4 text-gray-700">{req.start_date} to {req.end_date}</td>
-                                    <td className="p-4"><span className={`text-xs font-bold py-1 px-2 rounded-full ${ req.status === 'Approved' ? 'bg-green-100 text-green-700' : req.status === 'Pending' ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700' }`}>{req.status}</span></td>
-                                    <td className="p-4">
-                                        {/* MIGRATION FIX: onClick now opens the details modal */}
-                                        <button onClick={() => handleRowClick(req)} className="p-2 hover:bg-gray-200 rounded-full"><Eye size={16} className="text-gray-600" /></button>
-                                    </td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
+                <div>
+                    {/* REGRESSION FIX: Filter bar for Requests tab restored */}
+                    <div className="p-4 border-b flex justify-between items-center">
+                        <div className="flex items-center gap-2">
+                            <Filter size={16} className="text-gray-500"/>
+                            <select value={scope} onChange={e => setScope(e.target.value)} className="border-gray-300 rounded-md shadow-sm text-sm p-2">
+                                <option value="Mine">My Requests</option>
+                                {isManager && <option value="My Team">My Team</option>}
+                                <option value="All">All Company</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div className="p-6">
+                        <table className="w-full text-left">
+                            <thead><tr className="border-b border-gray-200"><th className="p-4 font-semibold text-gray-500 text-sm">Employee</th><th className="p-4 font-semibold text-gray-500 text-sm">Leave Type</th><th className="p-4 font-semibold text-gray-500 text-sm">Dates</th><th className="p-4 font-semibold text-gray-500 text-sm">Status</th><th className="p-4 font-semibold text-gray-500 text-sm">Actions</th></tr></thead>
+                            <tbody>
+                                {loading ? (<tr><td colSpan="5" className="p-4 text-center">Loading...</td></tr>)
+                                : filteredRequestsForList.map(req => (
+                                    <tr key={req.id} className="border-b border-gray-100 last:border-b-0 hover:bg-gray-50">
+                                        <td className="p-4 font-semibold text-gray-800">{req.employeeName}</td>
+                                        <td className="p-4 text-gray-700">{req.leave_type}</td>
+                                        <td className="p-4 text-gray-700">{req.start_date} to {req.end_date}</td>
+                                        <td className="p-4"><span className={`text-xs font-bold py-1 px-2 rounded-full ${ req.status === 'Approved' ? 'bg-green-100 text-green-700' : req.status === 'Pending' ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700' }`}>{req.status}</span></td>
+                                        <td className="p-4">
+                                            <button onClick={() => handleRowClick(req)} className="p-2 hover:bg-gray-200 rounded-full"><Eye size={16} className="text-gray-600" /></button>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             )}
-             {activeTab === 'Calendar' && <TeamCalendar events={filteredCalendarEvents} employees={employees} weekends={weekends} holidays={holidays} onDayClick={handleDayClick} />}
+             {activeTab === 'Calendar' && (
+                <div>
+                    {/* REGRESSION FIX: Filter bar for Calendar tab restored */}
+                    <div className="p-4 border-b flex flex-wrap items-center gap-x-6 gap-y-4">
+                        <div className="flex items-center gap-2">
+                            <Filter size={16} className="text-gray-500"/>
+                            <select value={scope} onChange={e => setScope(e.target.value)} className="border-gray-300 rounded-md shadow-sm text-sm p-2">
+                                <option value="Mine">My View</option>
+                                {isManager && <option value="My Team">My Team</option>}
+                                <option value="All">All Company</option>
+                            </select>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <span className="text-sm font-semibold text-gray-600">Leave Type:</span>
+                            <select value={selectedLeaveType} onChange={e => setSelectedLeaveType(e.target.value)} className="border-gray-300 rounded-md shadow-sm text-sm p-2">
+                                <option>All</option><option>Vacation</option><option>Sick Day</option><option>Personal (Unpaid)</option>
+                            </select>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <span className="text-sm font-semibold text-gray-600">Departments:</span>
+                            <div className="flex items-center gap-2 flex-wrap">
+                                {uniqueDepartments.map(dept => (
+                                    <button key={dept} onClick={() => handleDepartmentToggle(dept)} className={`text-xs font-semibold py-1 px-3 rounded-full ${selectedDepartments.includes(dept) ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'}`}>{dept}</button>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                    <TeamCalendar events={filteredCalendarEvents} employees={employees} weekends={weekends} holidays={holidays} onDayClick={handleDayClick} />
+                </div>
+            )}
              {activeTab === 'Approvals' && (
                 <div className="p-6">
                     <table className="w-full text-left">

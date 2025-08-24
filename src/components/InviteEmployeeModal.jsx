@@ -24,37 +24,32 @@ function InviteEmployeeModal({ isOpen, onClose, onInvitationSent }) {
     setInvitationLink('');
 
     try {
-      // Check if user already exists
-      const { data: existingEmployee } = await supabase
-        .from('employees')
-        .select('id')
-        .eq('company_id', companyId)
-        .eq('email', email)
-        .maybeSingle();
+      // Call the new, secure Supabase function to create the invite
+      const { data: newInvite, error: rpcError } = await supabase.rpc('create_invitation', {
+        invite_email: email,
+        invite_company_id: companyId
+      });
 
-      if (existingEmployee) {
-        setError('An employee with this email already exists.');
-        setLoading(false);
-        return;
+      if (rpcError) throw rpcError;
+
+      // The RPC function returns an array, we need the first element
+      const inviteData = newInvite[0];
+
+      if (!inviteData || !inviteData.token) {
+        throw new Error("Failed to retrieve invitation token from server.");
       }
 
-      // Create new invitation and get the token
-      const { data: newInvite, error: insertError } = await supabase
-        .from('invitations')
-        .insert({ email, company_id: companyId })
-        .select()
-        .single();
-
-      if (insertError) throw insertError;
-      if (!newInvite || !newInvite.token) throw new Error("Failed to retrieve invitation token.");
-
-      const url = `${window.location.origin}/accept-invite/${newInvite.token}`;
+      const url = `${window.location.origin}/accept-invite/${inviteData.token}`;
       setInvitationLink(url);
-      // BUG FIX: Removed onInvitationSent() call from here.
-      // It was causing the modal to close before the link could be displayed.
+
     } catch (err) {
-      setError('Failed to create invitation. An invite may already exist for this email.');
-      console.error(err);
+      // Check for a unique constraint violation specifically
+      if (err.message && err.message.includes('duplicate key value violates unique constraint "invitations_company_email_unique"')) {
+        setError('An invitation has already been sent to this email address.');
+      } else {
+        setError('Failed to create invitation. Please try again or contact support.');
+        console.error(err);
+      }
     } finally {
       setLoading(false);
     }
