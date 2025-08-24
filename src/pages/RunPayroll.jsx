@@ -1,7 +1,8 @@
+// src/pages/RunPayroll.jsx
+
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { db } from '../firebase';
-import { doc, onSnapshot, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { supabase } from '../supabaseClient'; // PAYROLL MIGRATION: Import Supabase
 import { Check, Banknote, Save } from 'lucide-react';
 import { useAppContext } from '../contexts/AppContext';
 
@@ -16,21 +17,30 @@ function RunPayroll() {
   const [isSaving, setIsSaving] = useState(false);
   const navigate = useNavigate();
 
+  // PAYROLL MIGRATION: Fetch the specific payroll run from Supabase
   useEffect(() => {
-    if (!runId || !companyId) { 
-        setLoading(false); 
-        return; 
+    if (!runId || !companyId) {
+        setLoading(false);
+        return;
     }
-    const runRef = doc(db, 'companies', companyId, 'payrollRuns', runId);
-    const unsubscribe = onSnapshot(runRef, (docSnap) => {
-        if (docSnap.exists()) {
-            const run = { id: docSnap.id, ...docSnap.data() };
-            setPayrollRun(run);
-            
-            if (employees.length > 0 && Object.keys(employeeData).length === 0) {
+    const fetchRun = async () => {
+        const { data, error } = await supabase
+            .from('payroll_runs')
+            .select('*')
+            .eq('id', runId)
+            .eq('company_id', companyId)
+            .single();
+
+        if (error) {
+            console.error("Error fetching payroll run:", error);
+            navigate('/payroll');
+        } else {
+            setPayrollRun(data);
+            // Initialize employeeData based on the fetched run or all company employees
+            if (employees.length > 0) {
                 const initialData = {};
                 employees.forEach(emp => {
-                    initialData[emp.id] = run.employeeData?.[emp.id] || {
+                    initialData[emp.id] = data.employee_data?.[emp.id] || {
                         baseSalary: emp.compensation?.includes('/year') ? parseFloat(emp.compensation.replace(/[^0-9.]/g, '')) / 12 : 0,
                         overtime: 0,
                         bonuses: 0,
@@ -43,12 +53,13 @@ function RunPayroll() {
                 });
                 setEmployeeData(initialData);
             }
-        } else {
-            navigate('/payroll');
         }
         setLoading(false);
-    });
-    return () => unsubscribe();
+    };
+
+    if (employees.length > 0) {
+        fetchRun();
+    }
   }, [runId, companyId, employees, navigate]);
 
   const handleDataChange = useCallback((empId, field, value) => {
@@ -77,27 +88,45 @@ function RunPayroll() {
     return { employeeTotals: calculated, companyTotals: { totalGross, totalNet } };
   }, [employeeData]);
 
+  // PAYROLL MIGRATION: Update the employee_data JSONB column
   const handleSaveDraft = async () => {
     if (!companyId) return;
     setIsSaving(true);
-    const runRef = doc(db, 'companies', companyId, 'payrollRuns', runId);
-    await updateDoc(runRef, { employeeData });
+    const { error } = await supabase
+      .from('payroll_runs')
+      .update({ employee_data: employeeData })
+      .eq('id', runId);
+
+    if (error) {
+        console.error("Error saving draft:", error);
+        alert("Failed to save draft.");
+    }
     setIsSaving(false);
   };
-  
+
+  // PAYROLL MIGRATION: Finalize the run by updating status, totals, and timestamp
   const handleFinalize = async () => {
       if (!companyId) return;
       if (!window.confirm("Are you sure you want to finalize this payroll run? This action cannot be undone.")) return;
       setIsSaving(true);
-      const runRef = doc(db, 'companies', companyId, 'payrollRuns', runId);
-      await updateDoc(runRef, {
-          employeeData,
-          status: 'Finalized',
-          totalGrossPay: calculatedData.companyTotals.totalGross,
-          totalNetPay: calculatedData.companyTotals.totalNet,
-          finalizedAt: serverTimestamp()
-      });
-      navigate(`/payroll/records/${runId}`);
+      const { error } = await supabase
+        .from('payroll_runs')
+        .update({
+            employee_data: employeeData,
+            status: 'Finalized',
+            total_gross_pay: calculatedData.companyTotals.totalGross,
+            total_net_pay: calculatedData.companyTotals.totalNet,
+            finalized_at: new Date().toISOString()
+        })
+        .eq('id', runId);
+
+      if (error) {
+          console.error("Error finalizing payroll:", error);
+          alert("Failed to finalize payroll.");
+      } else {
+          navigate(`/payroll/records/${runId}`);
+      }
+      setIsSaving(false);
   };
 
   if (loading || employeesLoading) { return <div className="p-8">Loading Payroll Worksheet...</div>; }
@@ -106,7 +135,8 @@ function RunPayroll() {
     <div className="p-8">
       <header className="mb-8">
         <Link to="/payroll" className="text-sm text-blue-600 font-semibold inline-block hover:underline mb-2">&larr; Back to Payroll Hub</Link>
-        <h1 className="text-3xl font-bold text-gray-800">Run Payroll: {payrollRun?.periodLabel}</h1>
+        {/* PAYROLL MIGRATION: Use new field period_label */}
+        <h1 className="text-3xl font-bold text-gray-800">Run Payroll: {payrollRun?.period_label}</h1>
       </header>
 
       <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">

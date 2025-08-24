@@ -1,44 +1,57 @@
+// src/components/PayrollSettings.jsx
+
 import React, { useState, useEffect } from 'react';
-import { db } from '../firebase';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { supabase } from '../supabaseClient'; // PAYROLL MIGRATION: Import Supabase
 import { Save } from 'lucide-react';
 import { useAppContext } from '../contexts/AppContext';
 
 function PayrollSettings() {
   const { companyId } = useAppContext();
   const [settings, setSettings] = useState({
-    companyName: '',
-    companyAddress: '',
-    rcNumber: '',
-    cnssNumber: '',
+    company_name: '',
+    company_address: '',
+    rc_number: '',
+    cnss_number: '',
   });
   const [loading, setLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
 
+  // PAYROLL MIGRATION: Fetch settings from the 'payroll_settings' table
   useEffect(() => {
     if (!companyId) {
       setLoading(false);
       return;
     }
     const fetchSettings = async () => {
-      const docRef = doc(db, 'companies', companyId, 'policies', 'payroll');
-      const docSnap = await getDoc(docRef);
-      if (docSnap.exists()) {
-        setSettings(docSnap.data());
+      const { data, error } = await supabase
+        .from('payroll_settings')
+        .select('*')
+        .eq('company_id', companyId)
+        .maybeSingle();
+
+      if (error) {
+        console.error("Error fetching payroll settings:", error);
+      } else if (data) {
+        setSettings(data);
       }
       setLoading(false);
     };
     fetchSettings();
   }, [companyId]);
 
+  // PAYROLL MIGRATION: Save settings using Supabase 'upsert'
   const handleSave = async () => {
     if (!companyId) return;
     setIsSaving(true);
     setSaveSuccess(false);
     try {
-      const docRef = doc(db, 'companies', companyId, 'policies', 'payroll');
-      await setDoc(docRef, settings, { merge: true });
+      const { error } = await supabase
+        .from('payroll_settings')
+        .upsert({ ...settings, company_id: companyId }, { onConflict: 'company_id' });
+
+      if (error) throw error;
+
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 2000);
     } catch (error) {
@@ -48,7 +61,7 @@ function PayrollSettings() {
       setIsSaving(false);
     }
   };
-  
+
   const handleChange = (e) => {
     const { id, value } = e.target;
     setSettings(prev => ({...prev, [id]: value}));
@@ -65,21 +78,25 @@ function PayrollSettings() {
         <p className="text-sm text-gray-600 mb-6">This information will appear on all generated payslips.</p>
         <div className="bg-gray-50 p-6 rounded-lg border space-y-4">
           <div>
-            <label htmlFor="companyName" className="block text-sm font-medium text-gray-700">Legal Company Name</label>
-            <input type="text" id="companyName" value={settings.companyName} onChange={handleChange} className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2" />
+            {/* PAYROLL MIGRATION: Field id updated to company_name */}
+            <label htmlFor="company_name" className="block text-sm font-medium text-gray-700">Legal Company Name</label>
+            <input type="text" id="company_name" value={settings.company_name} onChange={handleChange} className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2" />
           </div>
            <div>
-            <label htmlFor="companyAddress" className="block text-sm font-medium text-gray-700">Company Address</label>
-            <input type="text" id="companyAddress" value={settings.companyAddress} onChange={handleChange} className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2" />
+            {/* PAYROLL MIGRATION: Field id updated to company_address */}
+            <label htmlFor="company_address" className="block text-sm font-medium text-gray-700">Company Address</label>
+            <input type="text" id="company_address" value={settings.company_address} onChange={handleChange} className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2" />
           </div>
            <div className="grid grid-cols-2 gap-4">
               <div>
-                <label htmlFor="rcNumber" className="block text-sm font-medium text-gray-700">N° Registre de Commerce (RC)</label>
-                <input type="text" id="rcNumber" value={settings.rcNumber} onChange={handleChange} className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2" />
+                {/* PAYROLL MIGRATION: Field id updated to rc_number */}
+                <label htmlFor="rc_number" className="block text-sm font-medium text-gray-700">N° Registre de Commerce (RC)</label>
+                <input type="text" id="rc_number" value={settings.rc_number} onChange={handleChange} className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2" />
               </div>
               <div>
-                <label htmlFor="cnssNumber" className="block text-sm font-medium text-gray-700">N° d'affiliation CNSS</label>
-                <input type="text" id="cnssNumber" value={settings.cnssNumber} onChange={handleChange} className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2" />
+                {/* PAYROLL MIGRATION: Field id updated to cnss_number */}
+                <label htmlFor="cnss_number" className="block text-sm font-medium text-gray-700">N° d'affiliation CNSS</label>
+                <input type="text" id="cnss_number" value={settings.cnss_number} onChange={handleChange} className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2" />
               </div>
            </div>
         </div>

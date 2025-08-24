@@ -5,12 +5,12 @@ import { Link, useLocation } from 'react-router-dom';
 import { Home, User, Users, DollarSign, Clock, Calendar, FileText, BookOpen, MessageSquare, BarChart2, Building, Settings, LogOut } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 
-// UPDATED: Commented out all links except for the in-scope pages
+// --- PAYROLL MIGRATION: The Payroll link is now uncommented ---
 const navItems = [
   { path: '/dashboard', label: 'Home', icon: <Home size={20} /> },
   { path: '/profile', label: 'Profile', icon: <User size={20} /> },
   { path: '/people', label: 'People', icon: <Users size={20} /> },
-  // { path: '/payroll', label: 'Payroll', icon: <DollarSign size={20} /> },
+  { path: '/payroll', label: 'Payroll', icon: <DollarSign size={20} /> },
   // { path: '/time-off', label: 'Time Off', icon: <Calendar size={20} /> },
   // { path: '/documents', label: 'Documents', icon: <FileText size={20} /> },
   // { path: '/training', label: 'Training', icon: <BookOpen size={20} /> },

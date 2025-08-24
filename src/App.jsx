@@ -21,15 +21,17 @@ import Contact from './pages/Contact';
 import Privacy from './pages/Privacy';
 import Terms from './pages/Terms';
 
-// --- Out-of-scope pages are now fully commented out ---
-// import Payroll from './pages/Payroll';
-// import RunPayroll from './pages/RunPayroll';
-// import PayrollDetails from './pages/PayrollDetails';
+// --- PAYROLL MIGRATION: Routes are now uncommented ---
+import Payroll from './pages/Payroll';
+import RunPayroll from './pages/RunPayroll';
+import PayrollDetails from './pages/PayrollDetails';
+
+// --- Out-of-scope pages remain commented out ---
 // import TimeOff from './pages/TimeOff';
 // import Surveys from './pages/Surveys';
 // import SurveyStudio from './pages/SurveyStudio';
-// import TakeSurvey from './pages/TakeSurvey'; 
-// import SurveyResults from './pages/SurveyResults'; 
+// import TakeSurvey from './pages/TakeSurvey';
+// import SurveyResults from './pages/SurveyResults';
 // import Documents from './pages/Documents';
 // import Training from './pages/Training';
 // import Reporting from './pages/Reporting';
@@ -78,8 +80,13 @@ function App() {
           <Route path="people" element={<People />} />
           <Route path="people/:employeeId" element={<EmployeeProfile />} />
 
+          {/* --- PAYROLL MIGRATION: All payroll routes are now active --- */}
+          <Route path="payroll" element={<Payroll />} />
+          <Route path="payroll/run/:runId" element={<RunPayroll />} />
+          <Route path="payroll/records/:runId" element={<PayrollDetails />} />
+
+
           {/* --- Out-of-scope routes remain commented out --- */}
-          {/* <Route path="payroll" element={<Payroll />} /> */}
           {/* <Route path="time-off" element={<TimeOff />} /> */}
           {/* <Route path="surveys" element={<Surveys />} /> */}
           {/* <Route path="documents" element={<Documents />} /> */}
@@ -88,7 +95,7 @@ function App() {
           {/* <Route path="company" element={<Company />} /> */}
           {/* <Route path="settings" element={<Settings />} /> */}
         </Route>
-        
+
         {/* Public Routes */}
         <Route path="/landing" element={<PublicRoute><LandingPage /></PublicRoute>} />
         <Route path="/login" element={<PublicRoute><Login /></PublicRoute>} />
