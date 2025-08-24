@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { db } from '../firebase';
-import { doc, getDoc } from 'firebase/firestore';
+import { supabase } from '../supabaseClient';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { Users, Percent, CheckCircle, Clock, Shield } from 'lucide-react';
 import StatCard from '../components/StatCard';
@@ -17,10 +16,35 @@ function SurveyResults() {
   useEffect(() => {
     if (!surveyId || !companyId) return;
     const fetchSurvey = async () => {
-      const docRef = doc(db, 'companies', companyId, 'surveys', surveyId);
-      const docSnap = await getDoc(docRef);
-      if (docSnap.exists()) {
-        setSurvey({ id: docSnap.id, ...docSnap.data() });
+      const { data, error } = await supabase
+        .from('surveys')
+        .select(`
+          *,
+          survey_questions (
+            *,
+            survey_question_options (*)
+          ),
+          survey_participants (
+            employee_id
+          ),
+          survey_responses (
+            employee_id,
+            submitted_at,
+            answers
+          )
+        `)
+        .eq('id', surveyId)
+        .single();
+      
+      if (error) {
+        console.error("Error fetching survey results:", error);
+      } else {
+        setSurvey({
+          ...data,
+          questions: data.survey_questions.sort((a, b) => a.order - b.order),
+          participants: data.survey_participants.map(p => p.employee_id),
+          responses: data.survey_responses
+        });
       }
       setLoading(false);
     };
@@ -30,15 +54,15 @@ function SurveyResults() {
   const { resultsData, participationData, stats } = useMemo(() => {
     if (!survey || employees.length === 0) return { resultsData: {}, participationData: [], stats: {} };
     
-    const employeeMap = new Map(employees.map(e => [e.email, e.name]));
-    const responseMap = new Map((survey.responses || []).map(r => [r.userEmail, r]));
+    const employeeMap = new Map(employees.map(e => [e.id, e.name]));
+    const responseMap = new Map((survey.responses || []).map(r => [r.employee_id, r]));
 
-    const pData = (survey.participants || []).map(email => {
-        const response = responseMap.get(email);
+    const pData = (survey.participants || []).map(employeeId => {
+        const response = responseMap.get(employeeId);
         return {
-            name: employeeMap.get(email) || email,
+            name: employeeMap.get(employeeId) || 'Unknown Employee',
             status: response ? 'Responded' : 'Not Yet Responded',
-            submittedAt: response ? response.submittedAt.toDate().toLocaleString() : null
+            submittedAt: response ? new Date(response.submitted_at).toLocaleString() : null
         };
     });
 
@@ -46,13 +70,13 @@ function SurveyResults() {
     (survey.questions || []).forEach(q => {
       const responsesForQuestion = (survey.responses || []).map(r => ({
           answer: r.answers[q.id],
-          userEmail: r.userEmail,
-          submittedAt: r.submittedAt
+          employee_id: r.employee_id,
+          submitted_at: r.submitted_at
       })).filter(ans => ans.answer !== undefined);
 
       if (q.type === 'Multiple Choice') {
         const answerCounts = responsesForQuestion.map(r => r.answer);
-        questionResults[q.id] = { type: q.type, text: q.text, data: q.options.map(opt => ({ name: opt.text, count: answerCounts.filter(ans => ans === opt.text).length })) };
+        questionResults[q.id] = { type: q.type, text: q.text, data: q.survey_question_options.map(opt => ({ name: opt.text, count: answerCounts.filter(ans => ans === opt.text).length })) };
       } else if (q.type === 'Scale (1-5)') {
         const answers = responsesForQuestion.map(r => r.answer).filter(Boolean);
         const avg = answers.length > 0 ? answers.reduce((a,b) => a+b, 0) / answers.length : 0;
@@ -88,7 +112,7 @@ function SurveyResults() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
         <StatCard icon={<Users />} title="Total Responses" value={stats.responses} />
         <StatCard icon={<Percent />} title="Participation Rate" value={`${stats.participationRate}%`} />
-        {survey.isAnonymous && <StatCard icon={<Shield />} title="Anonymity" value="Enabled" />}
+        {survey.is_anonymous && <StatCard icon={<Shield />} title="Anonymity" value="Enabled" />}
       </div>
 
       <div className="bg-white rounded-lg shadow-sm border border-gray-200">
@@ -111,9 +135,9 @@ function SurveyResults() {
                               {result.data.map((res, i) => (
                                 <div key={i} className="p-3 bg-gray-50 border rounded-md">
                                   <p className="text-sm text-gray-700 italic">"{res.answer}"</p>
-                                  {!survey.isAnonymous && (
+                                  {!survey.is_anonymous && (
                                     <div className="text-right text-xs text-gray-400 mt-2 pt-2 border-t border-dashed">
-                                      - {employees.find(e => e.email === res.userEmail)?.name} on {res.submittedAt.toDate().toLocaleDateString()}
+                                      - {employees.find(e => e.id === res.employee_id)?.name} on {new Date(res.submitted_at).toLocaleDateString()}
                                     </div>
                                   )}
                                 </div>

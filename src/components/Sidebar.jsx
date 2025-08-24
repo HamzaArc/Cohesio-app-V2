@@ -14,10 +14,10 @@ const navItems = [
   { path: '/time-off', label: 'Time Off', icon: <Calendar size={20} /> },
   { path: '/documents', label: 'Documents', icon: <FileText size={20} /> },
   { path: '/training', label: 'Training', icon: <BookOpen size={20} /> },
-  // { path: '/surveys', label: 'Surveys', icon: <MessageSquare size={20} /> },
-  // { path: '/reporting', label: 'Reporting', icon: <BarChart2 size={20} /> },
-  // { path: '/company', label: 'Company', icon: <Building size={20} /> },
-  // { path: '/settings', label: 'Settings', icon: <Settings size={20} /> },
+  { path: '/surveys', label: 'Surveys', icon: <MessageSquare size={20} /> },
+  { path: '/reporting', label: 'Reporting', icon: <BarChart2 size={20} /> },
+  { path: '/company', label: 'Company', icon: <Building size={20} /> },
+  { path: '/settings', label: 'Settings', icon: <Settings size={20} /> },
 ];
 
 const NavLink = ({ to, children, icon }) => {

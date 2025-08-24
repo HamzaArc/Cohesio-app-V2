@@ -27,6 +27,14 @@ import PayrollDetails from './pages/PayrollDetails';
 import TimeOff from './pages/TimeOff';
 import Documents from './pages/Documents';
 import Training from './pages/Training';
+import Surveys from './pages/Surveys';
+import SurveyStudio from './pages/SurveyStudio';
+import TakeSurvey from './pages/TakeSurvey';
+import SurveyResults from './pages/SurveyResults';
+import Company from './pages/Company';
+import Reporting from './pages/Reporting';
+import Settings from './pages/Settings';
+
 
 function App() {
   const [session, setSession] = useState(null);
@@ -75,6 +83,14 @@ function App() {
           <Route path="time-off" element={<TimeOff />} />
           <Route path="documents" element={<Documents />} />
           <Route path="training" element={<Training />} />
+          <Route path="surveys" element={<Surveys />} />
+          <Route path="surveys/create" element={<SurveyStudio />} />
+          <Route path="surveys/edit/:surveyId" element={<SurveyStudio />} />
+          <Route path="surveys/take/:surveyId" element={<TakeSurvey />} />
+          <Route path="surveys/results/:surveyId" element={<SurveyResults />} />
+          <Route path="reporting" element={<Reporting />} />
+          <Route path="company" element={<Company />} />
+          <Route path="settings" element={<Settings />} />
         </Route>
 
         {/* Public Routes */}

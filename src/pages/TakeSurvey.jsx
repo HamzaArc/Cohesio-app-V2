@@ -1,15 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { db, auth } from '../firebase';
-import { doc, getDoc, updateDoc, arrayUnion } from 'firebase/firestore';
+import { supabase } from '../supabaseClient';
 import { Shield, Send } from 'lucide-react';
 import { useAppContext } from '../contexts/AppContext';
 
 function TakeSurvey() {
   const { surveyId } = useParams();
   const navigate = useNavigate();
-  const { companyId, currentUser } = useAppContext();
+  const { companyId, currentUser, employees } = useAppContext();
   const [survey, setSurvey] = useState(null);
+  const [questions, setQuestions] = useState([]);
   const [answers, setAnswers] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -17,21 +17,32 @@ function TakeSurvey() {
   useEffect(() => {
     if (!surveyId || !companyId || !currentUser) return;
     const fetchSurvey = async () => {
-      const docRef = doc(db, 'companies', companyId, 'surveys', surveyId);
-      const docSnap = await getDoc(docRef);
-      if (docSnap.exists()) {
-        const surveyData = { id: docSnap.id, ...docSnap.data() };
-        if (surveyData.responses?.some(r => r.userEmail === currentUser.email)) {
-            navigate('/surveys'); // Already responded
-        }
-        setSurvey(surveyData);
-      } else {
+      const { data: surveyData, error } = await supabase
+        .from('surveys')
+        .select('*')
+        .eq('id', surveyId)
+        .single();
+      
+      if (error || !surveyData) {
         navigate('/surveys');
+        return;
       }
+
+      const myEmployeeRecord = employees.find(e => e.email === currentUser.email);
+      const { data: response } = await supabase.from('survey_responses').select('id').eq('survey_id', surveyId).eq('employee_id', myEmployeeRecord.id).single();
+      if (response) {
+        navigate('/surveys'); // Already responded
+        return;
+      }
+      
+      setSurvey(surveyData);
+
+      const { data: questionsData } = await supabase.from('survey_questions').select('*, survey_question_options(*)').eq('survey_id', surveyId).order('order');
+      setQuestions(questionsData);
       setLoading(false);
     };
     fetchSurvey();
-  }, [surveyId, navigate, currentUser, companyId]);
+  }, [surveyId, navigate, currentUser, companyId, employees]);
 
   const handleAnswerChange = (questionId, value) => {
     setAnswers(prev => ({ ...prev, [questionId]: value }));
@@ -42,14 +53,11 @@ function TakeSurvey() {
     setLoading(true);
     setError('');
     try {
-        const response = {
-            userEmail: currentUser.email,
-            submittedAt: new Date(),
-            answers,
-        };
-        const surveyRef = doc(db, 'companies', companyId, 'surveys', surveyId);
-        await updateDoc(surveyRef, {
-            responses: arrayUnion(response)
+        const myEmployeeRecord = employees.find(e => e.email === currentUser.email);
+        await supabase.from('survey_responses').insert({
+            survey_id: surveyId,
+            employee_id: myEmployeeRecord.id,
+            answers: answers
         });
         navigate('/surveys');
     } catch(err) {
@@ -67,7 +75,7 @@ function TakeSurvey() {
       <header className="mb-8 max-w-4xl mx-auto">
         <h1 className="text-3xl font-bold text-gray-800">{survey.title}</h1>
         <p className="text-gray-500 mt-2">{survey.description}</p>
-        {survey.isAnonymous && (
+        {survey.is_anonymous && (
             <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg flex items-center gap-3">
                 <Shield size={20} className="text-blue-600"/>
                 <p className="text-sm text-blue-800">This is an anonymous survey. Your name will not be linked to your responses.</p>
@@ -76,7 +84,7 @@ function TakeSurvey() {
       </header>
       
       <div className="max-w-4xl mx-auto bg-white p-8 rounded-lg shadow-md border space-y-8">
-        {survey.questions.map((q, index) => (
+        {questions.map((q, index) => (
             <div key={q.id}>
                 <label className="block font-semibold text-gray-800">{index + 1}. {q.text}</label>
                 {q.type === 'Open Text' && <textarea rows="4" onChange={e => handleAnswerChange(q.id, e.target.value)} className="mt-2 block w-full border-gray-300 rounded-md shadow-sm p-2" />}
@@ -89,7 +97,7 @@ function TakeSurvey() {
                 )}
                 {q.type === 'Multiple Choice' && (
                     <div className="mt-2 space-y-2">
-                        {q.options.map(opt => (
+                        {q.survey_question_options.map(opt => (
                             <label key={opt.id} className="flex items-center p-3 border rounded-md has-[:checked]:bg-blue-50 has-[:checked]:border-blue-500">
                                 <input type="radio" name={q.id} value={opt.text} onChange={e => handleAnswerChange(q.id, e.target.value)} className="h-4 w-4 text-blue-600 border-gray-300"/>
                                 <span className="ml-3 text-sm text-gray-700">{opt.text}</span>

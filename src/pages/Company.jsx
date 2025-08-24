@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { db } from '../firebase';
-import { doc, onSnapshot, collection } from 'firebase/firestore';
+import { supabase } from '../supabaseClient';
 import { useAppContext } from '../contexts/AppContext';
 import { Building, MapPin, Calendar } from 'lucide-react';
 
@@ -28,25 +27,28 @@ function Company() {
       return;
     }
 
-    // Fetch company-wide settings like locations
-    const companyDocRef = doc(db, 'companies', companyId);
-    const unsubCompany = onSnapshot(companyDocRef, (docSnap) => {
-        if(docSnap.exists() && docSnap.data().locations) {
-            setLocations(docSnap.data().locations);
-        }
-    });
+    const fetchCompanyData = async () => {
+      const { data: companyData, error: companyError } = await supabase
+        .from('companies')
+        .select('locations')
+        .eq('id', companyId)
+        .single();
+      
+      if (companyError) console.error("Error fetching company locations:", companyError);
+      if (companyData) setLocations(companyData.locations || []);
 
-    // Fetch holidays from the timeOff policy subcollection
-    const holidaysColRef = collection(db, 'companies', companyId, 'policies', 'timeOff', 'holidays');
-    const unsubHolidays = onSnapshot(holidaysColRef, (snapshot) => {
-        setHolidays(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-        setLoading(false);
-    });
+      const { data: holidaysData, error: holidaysError } = await supabase
+        .from('time_off_holidays')
+        .select('*')
+        .eq('company_id', companyId);
+      
+      if (holidaysError) console.error("Error fetching holidays:", holidaysError);
+      if (holidaysData) setHolidays(holidaysData);
 
-    return () => {
-        unsubCompany();
-        unsubHolidays();
+      setLoading(false);
     };
+
+    fetchCompanyData();
   }, [companyId]);
 
   if (loading) {

@@ -26,12 +26,11 @@ function Reporting() {
     const currentYear = new Date().getFullYear();
 
     employees.forEach(emp => {
-      if (emp.hireDate) {
-        const hireDate = new Date(emp.hireDate);
+      if (emp.hire_date) {
+        const hireDate = new Date(emp.hire_date);
         if (hireDate.getFullYear() <= currentYear) {
             const month = hireDate.getMonth();
             for (let m = month; m < 12; m++) {
-                const monthKey = new Date(currentYear, m).toLocaleString('default', { month: 'short' });
                 monthlyHeadcount[m] = (monthlyHeadcount[m] || 0) + 1;
             }
         }
@@ -47,8 +46,8 @@ function Reporting() {
     const today = new Date();
     const firstDayOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
     const newHiresThisMonth = employees.filter(emp => {
-        if (!emp.hireDate) return false;
-        const hireDate = new Date(emp.hireDate);
+        if (!emp.hire_date) return false;
+        const hireDate = new Date(emp.hire_date);
         return hireDate >= firstDayOfMonth;
     }).length;
 

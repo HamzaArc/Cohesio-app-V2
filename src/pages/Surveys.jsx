@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Plus, Edit, Trash, CheckCircle, Clock, BarChart2, Users } from 'lucide-react';
-import { db, auth } from '../firebase';
-import { collection, onSnapshot, orderBy, query, doc, deleteDoc } from 'firebase/firestore';
+import { supabase } from '../supabaseClient';
 import DeleteConfirmationModal from '../components/DeleteConfirmationModal';
 import StatCard from '../components/StatCard';
 import { useAppContext } from '../contexts/AppContext';
@@ -24,12 +23,42 @@ function Surveys() {
         setLoading(false);
         return;
     }
-    const q = query(collection(db, 'companies', companyId, 'surveys'), orderBy('created', 'desc'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setSurveys(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
+    const fetchSurveys = async () => {
+      const { data, error } = await supabase
+        .from('surveys')
+        .select(`
+          *,
+          survey_participants (
+            employee_id
+          ),
+          survey_responses (
+            employee_id
+          )
+        `)
+        .eq('company_id', companyId)
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error("Error fetching surveys:", error);
+      } else {
+        setSurveys(data.map(s => ({
+          ...s,
+          participants: s.survey_participants.map(p => p.employee_id),
+          responses: s.survey_responses
+        })));
+      }
       setLoading(false);
-    });
-    return () => unsubscribe();
+    };
+
+    fetchSurveys();
+
+    const channel = supabase.channel('public:surveys')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'surveys' }, fetchSurveys)
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [companyId]);
 
   const { mySurveys, stats } = useMemo(() => {
@@ -42,15 +71,16 @@ function Surveys() {
     const completionRate = totalParticipants > 0 ? (totalResponses / totalParticipants) * 100 : 0;
     
     const my = surveys.filter(s => {
-        const hasResponded = s.responses?.some(r => r.userEmail === currentUser.email);
-        return s.status === 'Active' && s.participants?.includes(currentUser.email) && !hasResponded;
+        const myEmployeeRecord = employees.find(e => e.email === currentUser.email);
+        const hasResponded = s.responses?.some(r => r.employee_id === myEmployeeRecord?.id);
+        return s.status === 'Active' && s.participants?.includes(myEmployeeRecord?.id) && !hasResponded;
     });
 
     return { 
       mySurveys: my,
       stats: { active, closed, completionRate: completionRate.toFixed(0) }
     };
-  }, [surveys, currentUser]);
+  }, [surveys, currentUser, employees]);
 
   const handleDeleteClick = (e, survey) => {
     e.stopPropagation();
@@ -61,7 +91,7 @@ function Surveys() {
   const handleDeleteConfirm = async () => {
     if (!selectedSurvey || !companyId) return;
     setIsDeleting(true);
-    await deleteDoc(doc(db, 'companies', companyId, 'surveys', selectedSurvey.id));
+    await supabase.from('surveys').delete().eq('id', selectedSurvey.id);
     setIsDeleteModalOpen(false);
     setSelectedSurvey(null);
     setIsDeleting(false);

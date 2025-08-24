@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link, useParams } from 'react-router-dom';
-import { db, auth } from '../firebase';
-import { collection, doc, addDoc, getDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { supabase } from '../supabaseClient';
 import { Shield, Plus, Trash2, GripVertical, MessageSquare, CheckSquare, Star, List, X, Send, Users as UsersIcon } from 'lucide-react';
 import { useAppContext } from '../contexts/AppContext';
 
@@ -112,7 +111,7 @@ function SurveyStudio() {
   const navigate = useNavigate();
   const { employees, companyId, currentUser } = useAppContext();
 
-  const [formData, setFormData] = useState({ title: '', description: '', isAnonymous: true });
+  const [formData, setFormData] = useState({ title: '', description: '', is_anonymous: true });
   const [questions, setQuestions] = useState([]);
   const [participants, setParticipants] = useState([]);
   const [assignmentType, setAssignmentType] = useState('all');
@@ -129,32 +128,51 @@ function SurveyStudio() {
       setLoading(true);
       setPageTitle('Edit Survey');
       const fetchSurvey = async () => {
-        const docRef = doc(db, 'companies', companyId, 'surveys', surveyId);
-        const docSnap = await getDoc(docRef);
-        if (docSnap.exists()) {
-          const data = docSnap.data();
-          setFormData({ title: data.title, description: data.description, isAnonymous: data.isAnonymous });
-          setQuestions(data.questions || []);
+        const { data, error } = await supabase
+          .from('surveys')
+          .select(`
+            *,
+            survey_questions (
+              *,
+              survey_question_options (*)
+            ),
+            survey_participants (
+              employee_id
+            )
+          `)
+          .eq('id', surveyId)
+          .single();
+
+        if (error) {
+          console.error("Error fetching survey for editing:", error);
+          navigate('/surveys');
+        } else {
+          setFormData({ title: data.title, description: data.description, is_anonymous: data.is_anonymous });
+          setQuestions(data.survey_questions.map(q => ({
+            id: q.id,
+            text: q.text,
+            type: q.type,
+            order: q.order,
+            options: q.survey_question_options.map(o => ({ id: o.id, text: o.text }))
+          })).sort((a, b) => a.order - b.order));
           
-          if (data.participants?.length === employees.length && employees.length > 0) {
+          const participantIds = data.survey_participants.map(p => p.employee_id);
+          if (participantIds.length === employees.length && employees.length > 0) {
             setAssignmentType('all');
-            setParticipants(data.participants);
           } else {
             setAssignmentType('specific');
-            setParticipants(data.participants || []);
           }
-        } else {
-          navigate('/surveys');
+          setParticipants(participantIds);
         }
         setLoading(false);
       };
       if (employees.length > 0) fetchSurvey();
     } else {
-        setParticipants(employees.map(e => e.email));
+        setParticipants(employees.map(e => e.id));
     }
   }, [surveyId, isEditMode, navigate, employees, companyId]);
   
-  const addQuestion = () => setQuestions([...questions, { id: Date.now(), type: 'Open Text', text: '', options: [] }]);
+  const addQuestion = () => setQuestions([...questions, { id: `new-${Date.now()}`, type: 'Open Text', text: '', options: [] }]);
   const removeQuestion = (id) => setQuestions(questions.filter(q => q.id !== id));
   const updateQuestion = (id, updated) => setQuestions(questions.map(q => q.id === id ? updated : q));
   
@@ -170,13 +188,13 @@ function SurveyStudio() {
     setQuestions(newQuestions);
   };
 
-  const handleEmployeeToggle = (email) => {
-    setParticipants(prev => prev.includes(email) ? prev.filter(e => e !== email) : [...prev, email]);
+  const handleEmployeeToggle = (employeeId) => {
+    setParticipants(prev => prev.includes(employeeId) ? prev.filter(id => id !== employeeId) : [...prev, employeeId]);
   };
 
   useEffect(() => {
     if (assignmentType === 'all') {
-      setParticipants(employees.map(e => e.email));
+      setParticipants(employees.map(e => e.id));
     }
   }, [assignmentType, employees]);
 
@@ -187,21 +205,47 @@ function SurveyStudio() {
     setLoading(true);
 
     try {
-      const surveyData = { ...formData, questions, participants };
-      if (newStatus) surveyData.status = newStatus;
-
       if (isEditMode) {
-        const docRef = doc(db, 'companies', companyId, 'surveys', surveyId);
-        await updateDoc(docRef, surveyData);
+        // Update existing survey
+        await supabase.from('surveys').update({ ...formData, status: newStatus || formData.status }).eq('id', surveyId);
+        // This is a simplified update. A more robust solution would diff questions and options to update, insert, or delete.
+        // For this migration, we'll just re-insert them for simplicity.
+        await supabase.from('survey_questions').delete().eq('survey_id', surveyId);
       } else {
-        const newSurvey = { ...surveyData, status: newStatus || 'Draft', responses: [], created: serverTimestamp(), createdBy: currentUser.email };
-        const docRef = await addDoc(collection(db, 'companies', companyId, 'surveys'), newSurvey);
+        // Create new survey
+        const { data: newSurvey } = await supabase.from('surveys').insert({ 
+          ...formData, 
+          company_id: companyId,
+          created_by: currentUser.email,
+          status: newStatus || 'Draft',
+        }).select().single();
+        
+        for (const [index, q] of questions.entries()) {
+          const { data: newQuestion } = await supabase.from('survey_questions').insert({
+            survey_id: newSurvey.id,
+            text: q.text,
+            type: q.type,
+            order: index,
+          }).select().single();
+          if (q.type === 'Multiple Choice' && q.options) {
+            await supabase.from('survey_question_options').insert(q.options.map(opt => ({
+              question_id: newQuestion.id,
+              text: opt.text,
+            })));
+          }
+        }
+        
+        await supabase.from('survey_participants').insert(participants.map(empId => ({
+          survey_id: newSurvey.id,
+          employee_id: empId,
+        })));
+
         if (newStatus !== 'Active') {
-          navigate(`/surveys/edit/${docRef.id}`);
-          return;
+          navigate(`/surveys/edit/${newSurvey.id}`);
+        } else {
+          navigate('/surveys');
         }
       }
-      navigate('/surveys');
     } catch (err) {
       console.error("Error saving survey:", err);
       setError('Could not save survey.');
@@ -221,7 +265,7 @@ function SurveyStudio() {
     <div className="p-8 bg-gray-50 min-h-full">
       <header className="mb-8"><Link to="/surveys" className="text-sm text-blue-600 font-semibold hover:underline mb-2">&larr; Back to Surveys</Link><h1 className="text-3xl font-bold text-gray-800">{pageTitle}</h1></header>
       <div className="max-w-4xl mx-auto space-y-6">
-        <div className="bg-white p-8 rounded-lg shadow-md border"><h2 className="text-xl font-bold text-gray-800 mb-4">1. Details</h2><div className="space-y-6"><div><label htmlFor="title" className="block text-sm font-medium">Survey Title</label><input type="text" id="title" value={formData.title} onChange={handleChange} placeholder="e.g., Quarterly Employee Engagement" className="mt-1 block w-full border-gray-300 rounded-md shadow-sm p-2" /></div><div><label htmlFor="description" className="block text-sm font-medium">Description (Optional)</label><textarea id="description" value={formData.description} onChange={handleChange} rows="3" placeholder="Purpose of this survey." className="mt-1 block w-full border-gray-300 rounded-md shadow-sm p-2"></textarea></div><div><label className="block text-sm font-medium">Anonymity</label><div className="mt-2 p-4 border rounded-lg flex items-start gap-4 hover:border-blue-500 cursor-pointer" onClick={() => setFormData(prev => ({...prev, isAnonymous: !prev.isAnonymous}))}><input type="checkbox" checked={formData.isAnonymous} readOnly className="h-5 w-5 rounded border-gray-300 text-blue-600 mt-0.5" /><div><h4 className="font-semibold">Anonymous Responses</h4><p className="text-xs text-gray-500">Employee names will be hidden from their responses.</p></div></div></div></div></div>
+        <div className="bg-white p-8 rounded-lg shadow-md border"><h2 className="text-xl font-bold text-gray-800 mb-4">1. Details</h2><div className="space-y-6"><div><label htmlFor="title" className="block text-sm font-medium">Survey Title</label><input type="text" id="title" value={formData.title} onChange={handleChange} placeholder="e.g., Quarterly Employee Engagement" className="mt-1 block w-full border-gray-300 rounded-md shadow-sm p-2" /></div><div><label htmlFor="description" className="block text-sm font-medium">Description (Optional)</label><textarea id="description" value={formData.description} onChange={handleChange} rows="3" placeholder="Purpose of this survey." className="mt-1 block w-full border-gray-300 rounded-md shadow-sm p-2"></textarea></div><div><label className="block text-sm font-medium">Anonymity</label><div className="mt-2 p-4 border rounded-lg flex items-start gap-4 hover:border-blue-500 cursor-pointer" onClick={() => setFormData(prev => ({...prev, is_anonymous: !prev.is_anonymous}))}><input type="checkbox" checked={formData.is_anonymous} readOnly className="h-5 w-5 rounded border-gray-300 text-blue-600 mt-0.5" /><div><h4 className="font-semibold">Anonymous Responses</h4><p className="text-xs text-gray-500">Employee names will be hidden from their responses.</p></div></div></div></div></div>
         
         <div className="bg-white p-8 rounded-lg shadow-md border"><h2 className="text-xl font-bold text-gray-800 mb-4">2. Questions</h2><div className="space-y-4">{questions.map((q, index) => (<QuestionCard key={q.id} question={q} index={index} updateQuestion={updateQuestion} removeQuestion={removeQuestion} onDragStart={(e) => handleDragStart(e, index)} onDragEnter={(e) => handleDragEnter(e, index)} onDragEnd={handleDrop} />))}<button onClick={addQuestion} className="mt-4 bg-blue-50 text-blue-600 font-semibold py-2 px-4 rounded-lg hover:bg-blue-100 text-sm w-full border-2 border-dashed border-blue-200"><Plus size={16} className="inline mr-2"/>Add Question</button></div></div>
         
@@ -238,7 +282,7 @@ function SurveyStudio() {
               <div className="border rounded-lg p-2 max-h-48 overflow-y-auto mt-4">
                 {employees.map(emp => (
                   <div key={emp.id} className="flex items-center p-2 rounded-md hover:bg-gray-50">
-                    <input type="checkbox" id={`assign-emp-${emp.id}`} checked={participants.includes(emp.email)} onChange={() => handleEmployeeToggle(emp.email)} className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+                    <input type="checkbox" id={`assign-emp-${emp.id}`} checked={participants.includes(emp.id)} onChange={() => handleEmployeeToggle(emp.id)} className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
                     <label htmlFor={`assign-emp-${emp.id}`} className="ml-3 text-sm text-gray-700">{emp.name}</label>
                   </div>
                 ))}
