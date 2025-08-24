@@ -1,8 +1,8 @@
 // src/components/InviteEmployeeModal.jsx
 
 import React, { useState } from 'react';
-import { supabase } from '../supabaseClient'; // UPDATED: Import Supabase
-import { X, AtSign } from 'lucide-react';
+import { supabase } from '../supabaseClient';
+import { X, AtSign, Clipboard, Check } from 'lucide-react';
 import { useAppContext } from '../contexts/AppContext';
 
 function InviteEmployeeModal({ isOpen, onClose, onInvitationSent }) {
@@ -10,8 +10,9 @@ function InviteEmployeeModal({ isOpen, onClose, onInvitationSent }) {
   const [email, setEmail] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [invitationLink, setInvitationLink] = useState('');
+  const [copied, setCopied] = useState(false);
 
-  // SUPABASE: Send invitation logic
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!email || !companyId) {
@@ -20,58 +21,57 @@ function InviteEmployeeModal({ isOpen, onClose, onInvitationSent }) {
     }
     setLoading(true);
     setError('');
+    setInvitationLink('');
 
     try {
-      // Check if user already exists in this company
-      const { data: existingEmployee, error: employeeError } = await supabase
+      // Check if user already exists
+      const { data: existingEmployee } = await supabase
         .from('employees')
         .select('id')
         .eq('company_id', companyId)
         .eq('email', email)
         .maybeSingle();
 
-      if (employeeError) throw employeeError;
       if (existingEmployee) {
-        setError('An employee with this email already exists in your company.');
-        setLoading(false);
-        return;
-      }
-      
-      // Check if an invitation already exists
-      const { data: existingInvite, error: inviteError } = await supabase
-        .from('invitations')
-        .select('id')
-        .eq('company_id', companyId)
-        .eq('email', email)
-        .maybeSingle();
-      
-      if (inviteError) throw inviteError;
-      if (existingInvite) {
-        setError('An invitation has already been sent to this email address.');
+        setError('An employee with this email already exists.');
         setLoading(false);
         return;
       }
 
-      // Insert new invitation
-      const { error: insertError } = await supabase
+      // Create new invitation and get the token
+      const { data: newInvite, error: insertError } = await supabase
         .from('invitations')
-        .insert({ email, company_id: companyId });
+        .insert({ email, company_id: companyId })
+        .select()
+        .single();
 
       if (insertError) throw insertError;
+      if (!newInvite || !newInvite.token) throw new Error("Failed to retrieve invitation token.");
 
-      onInvitationSent();
-      handleClose();
+      const url = `${window.location.origin}/accept-invite/${newInvite.token}`;
+      setInvitationLink(url);
+      // BUG FIX: Removed onInvitationSent() call from here.
+      // It was causing the modal to close before the link could be displayed.
     } catch (err) {
-      setError('Failed to send invitation. Please try again.');
+      setError('Failed to create invitation. An invite may already exist for this email.');
       console.error(err);
     } finally {
       setLoading(false);
     }
   };
 
+  const handleCopy = () => {
+    navigator.clipboard.writeText(invitationLink).then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
   const handleClose = () => {
     setEmail('');
     setError('');
+    setInvitationLink('');
+    setCopied(false);
     onClose();
   };
 
@@ -84,34 +84,50 @@ function InviteEmployeeModal({ isOpen, onClose, onInvitationSent }) {
           <h2 className="text-2xl font-bold text-gray-800">Invite Employee</h2>
           <button onClick={handleClose} className="p-1 rounded-full hover:bg-gray-200"><X size={24} /></button>
         </div>
-        <form onSubmit={handleSubmit}>
-          <div className="space-y-4">
+
+        {invitationLink ? (
             <div>
-              <label htmlFor="email" className="block text-sm font-medium text-gray-700">Employee Email</label>
-              <div className="mt-1 relative">
-                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                    <AtSign className="h-5 w-5 text-gray-400" />
-                  </div>
-                  <input 
-                    type="email" 
-                    id="email" 
-                    value={email} 
-                    onChange={(e) => setEmail(e.target.value)} 
-                    placeholder="name@company.com"
-                    className="w-full pl-10 p-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    required
-                  />
-              </div>
+                <p className="text-sm text-gray-600 mb-2">Invitation created! Share this link with the new employee to set up their account.</p>
+                <div className="relative">
+                    <input type="text" value={invitationLink} readOnly className="w-full p-2 pr-10 border border-gray-300 rounded-md bg-gray-50 text-sm" />
+                    <button onClick={handleCopy} className="absolute inset-y-0 right-0 px-3 flex items-center text-gray-500 hover:text-blue-600">
+                        {copied ? <Check size={16} className="text-green-600" /> : <Clipboard size={16} />}
+                    </button>
+                </div>
+                <button onClick={handleClose} className="mt-6 w-full bg-blue-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-blue-700">
+                    Done
+                </button>
             </div>
-          </div>
-          {error && <p className="text-red-500 text-sm mt-4">{error}</p>}
-          <div className="mt-8 flex justify-end">
-            <button type="button" onClick={handleClose} className="bg-gray-200 text-gray-800 font-bold py-2 px-4 rounded-lg mr-2 hover:bg-gray-300">Cancel</button>
-            <button type="submit" disabled={loading} className="bg-blue-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-blue-700 disabled:bg-gray-400">
-              {loading ? 'Sending...' : 'Send Invitation'}
-            </button>
-          </div>
-        </form>
+        ) : (
+            <form onSubmit={handleSubmit}>
+                <div className="space-y-4">
+                    <div>
+                    <label htmlFor="email" className="block text-sm font-medium text-gray-700">Employee Email</label>
+                    <div className="mt-1 relative">
+                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                            <AtSign className="h-5 w-5 text-gray-400" />
+                        </div>
+                        <input
+                            type="email"
+                            id="email"
+                            value={email}
+                            onChange={(e) => setEmail(e.target.value)}
+                            placeholder="name@company.com"
+                            className="w-full pl-10 p-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            required
+                        />
+                    </div>
+                    </div>
+                </div>
+                {error && <p className="text-red-500 text-sm mt-4">{error}</p>}
+                <div className="mt-8 flex justify-end">
+                    <button type="button" onClick={handleClose} className="bg-gray-200 text-gray-800 font-bold py-2 px-4 rounded-lg mr-2 hover:bg-gray-300">Cancel</button>
+                    <button type="submit" disabled={loading} className="bg-blue-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-blue-700 disabled:bg-gray-400">
+                    {loading ? 'Creating...' : 'Create Invitation Link'}
+                    </button>
+                </div>
+            </form>
+        )}
       </div>
     </div>
   );

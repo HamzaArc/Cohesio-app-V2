@@ -7,6 +7,7 @@ import { supabase } from './supabaseClient';
 import Layout from './components/Layout';
 import Login from './pages/Login';
 import SignUp from './pages/SignUp';
+import AcceptInvite from './pages/AcceptInvite'; // INVITATION FLOW: Import the new page
 import LandingPage from './pages/LandingPage';
 import Dashboard from './pages/Dashboard';
 import Profile from './pages/Profile';
@@ -23,20 +24,7 @@ import Terms from './pages/Terms';
 import Payroll from './pages/Payroll';
 import RunPayroll from './pages/RunPayroll';
 import PayrollDetails from './pages/PayrollDetails';
-
-// --- TIME OFF MIGRATION: Route is now uncommented ---
 import TimeOff from './pages/TimeOff';
-
-// --- Out-of-scope pages remain commented out ---
-// import Surveys from './pages/Surveys';
-// import SurveyStudio from './pages/SurveyStudio';
-// import TakeSurvey from './pages/TakeSurvey';
-// import SurveyResults from './pages/SurveyResults';
-// import Documents from './pages/Documents';
-// import Training from './pages/Training';
-// import Reporting from './pages/Reporting';
-// import Company from './pages/Company';
-// import Settings from './pages/Settings';
 
 function App() {
   const [session, setSession] = useState(null);
@@ -82,23 +70,15 @@ function App() {
           <Route path="payroll" element={<Payroll />} />
           <Route path="payroll/run/:runId" element={<RunPayroll />} />
           <Route path="payroll/records/:runId" element={<PayrollDetails />} />
-
-          {/* --- TIME OFF MIGRATION: Route is now active --- */}
           <Route path="time-off" element={<TimeOff />} />
-
-          {/* --- Out-of-scope routes remain commented out --- */}
-          {/* <Route path="surveys" element={<Surveys />} /> */}
-          {/* <Route path="documents" element={<Documents />} /> */}
-          {/* <Route path="training" element={<Training />} /> */}
-          {/* <Route path="reporting" element={<Reporting />} /> */}
-          {/* <Route path="company" element={<Company />} /> */}
-          {/* <Route path="settings" element={<Settings />} /> */}
         </Route>
 
         {/* Public Routes */}
         <Route path="/landing" element={<PublicRoute><LandingPage /></PublicRoute>} />
         <Route path="/login" element={<PublicRoute><Login /></PublicRoute>} />
         <Route path="/signup" element={<PublicRoute><SignUp /></PublicRoute>} />
+        {/* INVITATION FLOW: Add the new route for accepting invites */}
+        <Route path="/accept-invite/:token" element={<PublicRoute><AcceptInvite /></PublicRoute>} />
         <Route path="/features" element={<PublicRoute><Features /></PublicRoute>} />
         <Route path="/pricing" element={<PublicRoute><Pricing /></PublicRoute>} />
         <Route path="/integrations" element={<PublicRoute><Integrations /></PublicRoute>} />
